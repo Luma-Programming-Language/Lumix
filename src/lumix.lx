@@ -1,0 +1,518 @@
+// Compile the program with 
+// luma src/lumix.lx -name lumix -l std/io.lx std/sys.lx std/vector.lx std/string.lx std/memory.lx --no-sanitize   
+@module "build"
+
+@use "std_io" as io
+@use "std_sys" as sys
+@use "std_string" as string
+@use "std_memory" as mem
+
+const BuildConfig -> struct {
+    entry_point: *byte,
+    output_name: *byte,
+    stdlib_path: *byte,
+    optimize: int,
+    debug_symbols: int,
+    verbose: int
+};
+
+const NULL_BYTE: Slice = Slice { ptr: "", len: 0 };
+const MAX_FILES: int = 100;
+const MAX_DEPS: int = 50;
+
+let g_module_names: [*byte; 100];
+let g_file_paths: [*byte; 100];
+let g_dependencies: [**byte; 100];
+let g_dep_counts: [int; 100];
+let g_visited: [int; 100];
+let g_in_stack: [int; 100];
+let g_graph_size: int = 0;
+
+// Parse a file to find @use directives
+const find_imports -> fn (file_path: *byte, out_count: *int) **byte {
+    let imports: **byte = cast<**byte>(alloc(MAX_DEPS * sizeof<*byte>));
+    *out_count = 0;
+    
+    let content: *byte = io::read_file(file_path);
+    if (content == cast<*byte>(0)) {
+        return imports;
+    }
+    
+    defer { free(content); }
+    
+    let i: int = 0;
+    let len: int = string::strlen(content);
+
+    loop (i < len) {
+        let tmp: *byte = cast<*byte>(alloc(5 * sizeof<byte>));
+        defer { free(tmp); } 
+        
+        loop [j: int = 0](j < 4 && i + j < len) : (j = j + 1) {
+            tmp[j] = content[i + j];
+        }
+        tmp[4] = '\0';
+
+        if (string::strcmp(tmp, "@use") == 0) {
+            i = i + 4;
+            loop (i < len && (content[i] == ' ' || content[i] == '\t')) : (i = i + 1) {}
+
+            if (i < len && content[i] == '"') {
+                i = i + 1;
+                let mod_start: int = i;
+                loop (i < len && content[i] != '"') : (i = i + 1) {}
+                
+                let mod_len: int = i - mod_start;
+                if (mod_len > 0 && *out_count < MAX_DEPS) {
+                    let module_name: *byte = cast<*byte>(alloc((mod_len + 1) * sizeof<byte>));
+                    mem::memcpy(cast<*void>(module_name), 
+                               cast<*void>(&content[mod_start]), 
+                               mod_len);
+                    module_name[mod_len] = '\0';
+                    
+                    imports[*out_count] = module_name;
+                    *out_count = *out_count + 1;
+                }
+            }
+        } else i = i + 1;
+    }
+    
+    return imports;
+}
+
+const get_cwd -> fn () *byte {
+    let cwd: *byte = cast<*byte>(alloc(1024));
+    system("pwd > /tmp/luma_cwd.txt");
+    
+    let result: *byte = io::read_file("/tmp/luma_cwd.txt");
+    if (result != cast<*byte>(0)) {
+        let len: int = string::strlen(result);
+        if (len > 0 && result[len-1] == '\n') {
+            result[len-1] = '\0';
+        }
+        mem::memcpy(cast<*void>(cwd), cast<*void>(result), len);
+        free(result);
+    }
+    system("rm -f /tmp/luma_cwd.txt");
+    
+    return cwd;
+}
+
+const scan_directory -> fn (path: *byte, out_count: *int) **byte {
+    let files: **byte = cast<**byte>(alloc(MAX_FILES * sizeof<*byte>));
+    *out_count = 0;
+    
+    system("rm -f /tmp/luma_files.txt 2>/dev/null");
+    
+    let scan_cmd: *byte = cast<*byte>(alloc(512));
+    defer { free(scan_cmd); }
+    scan_cmd[0] = '\0';
+    
+    string::cat(scan_cmd, "find ", path);
+    string::cat(scan_cmd, " -name '*.lx' -type f 2>/dev/null > /tmp/luma_files.txt", "");
+    
+    system(scan_cmd);
+    
+    let file_list: *byte = io::read_file("/tmp/luma_files.txt");
+    
+    if (file_list == cast<*byte>(0) || file_list[0] == '\0') {
+        system("rm -f /tmp/luma_files.txt 2>/dev/null");
+        system("ls *.lx 2>/dev/null > /tmp/luma_files.txt");
+        system("ls */*.lx 2>/dev/null >> /tmp/luma_files.txt");
+        system("ls */*/*.lx 2>/dev/null >> /tmp/luma_files.txt");
+        system("ls */*/*/*.lx 2>/dev/null >> /tmp/luma_files.txt");
+        
+        file_list = io::read_file("/tmp/luma_files.txt");
+        if (file_list == cast<*byte>(0)) {
+            return files;
+        }
+    }
+    
+    defer { free(file_list); }
+    
+    let i: int = 0;
+    let line_start: int = 0;
+    
+    loop (file_list[i] != '\0' && *out_count < MAX_FILES) {
+        if (file_list[i] == '\n') {
+            let line_len: int = i - line_start;
+            if (line_len > 0) {
+                let filepath: *byte = cast<*byte>(alloc((line_len + 1) * sizeof<byte>));
+                mem::memcpy(cast<*void>(filepath), 
+                           cast<*void>(&file_list[line_start]), 
+                           line_len);
+                filepath[line_len] = '\0';
+                
+                if (filepath[0] == '.' && filepath[1] == '/') {
+                    let clean_path: *byte = cast<*byte>(alloc((line_len - 1) * sizeof<byte>));
+                    mem::memcpy(cast<*void>(clean_path), 
+                               cast<*void>(&filepath[2]), 
+                               line_len - 2);
+                    clean_path[line_len - 2] = '\0';
+                    free(filepath);
+                    filepath = clean_path;
+                }
+                
+                files[*out_count] = filepath;
+                *out_count = *out_count + 1;
+            }
+            line_start = i + 1;
+        }
+        i = i + 1;
+    }
+    
+    if (i > line_start && *out_count < MAX_FILES) {
+        let line_len: int = i - line_start;
+        let filepath: *byte = cast<*byte>(alloc((line_len + 1) * sizeof<byte>));
+        mem::memcpy(cast<*void>(filepath), 
+                   cast<*void>(&file_list[line_start]), 
+                   line_len);
+        filepath[line_len] = '\0';
+        
+        if (filepath[0] == '.' && filepath[1] == '/') {
+            let clean_path: *byte = cast<*byte>(alloc((line_len - 1) * sizeof<byte>));
+            mem::memcpy(cast<*void>(clean_path), 
+                       cast<*void>(&filepath[2]), 
+                       line_len - 2);
+            clean_path[line_len - 2] = '\0';
+            free(filepath);
+            filepath = clean_path;
+        }
+        
+        files[*out_count] = filepath;
+        *out_count = *out_count + 1;
+    }
+    
+    system("rm -f /tmp/luma_files.txt 2>/dev/null");
+    
+    return files;
+}
+
+const extract_module_name -> fn (filepath: *byte) *byte {
+    let len: int = string::strlen(filepath);
+    
+    if (len < 4) {
+        return cast<*byte>(0);
+    }
+    
+    if (filepath[len-3] != '.' || filepath[len-2] != 'l' || filepath[len-1] != 'x') {
+        return cast<*byte>(0);
+    }
+    
+    let last_slash: int = -1;
+    loop [i: int = 0](i < len) : (i = i + 1) {
+        if (filepath[i] == '/') {
+            last_slash = i;
+        }
+    }
+    
+    let name_start: int = 0;
+    if (len >= 4 && filepath[0] == 's' && filepath[1] == 't' && 
+        filepath[2] == 'd' && filepath[3] == '/') {
+        name_start = 0;
+    } else {
+        name_start = last_slash + 1;
+    }
+    
+    let name_end: int = len - 3;
+    let name_len: int = name_end - name_start;
+    
+    if (name_len <= 0) {
+        return cast<*byte>(0);
+    }
+    
+    let module_name: *byte = cast<*byte>(alloc((name_len + 1) * sizeof<byte>));
+    mem::memcpy(cast<*void>(module_name), 
+               cast<*void>(&filepath[name_start]), 
+               name_len);
+    module_name[name_len] = '\0';
+    
+    return module_name;
+}
+
+const build_dep_graph -> fn (scan_path: *byte) int {
+    g_graph_size = 0;
+    
+    let cwd: *byte = get_cwd();
+    defer { free(cwd); }
+    
+    let file_count: int = 0;
+    let files: **byte = scan_directory(scan_path, &file_count);
+    
+    if (file_count == 0) {
+        io::print_err("\nError: No .lx files found in current directory\n", [0]);
+        io::print_err("Make sure you're running this from a directory containing .lx files\n", [0]);
+        return 0;
+    }
+    
+    loop [i: int = 0](i < file_count) : (i = i + 1) {
+        io::print("  - %s\n", [io::str_arg(files[i])]);
+    }
+    io::print("\n", [io::NULL_FORMAT_ARG]);
+
+    loop [i: int = 0](i < file_count && g_graph_size < MAX_FILES) : (i = i + 1) {
+        let filepath: *byte = files[i];
+        
+        let module_name: *byte = extract_module_name(filepath);
+        if (module_name == cast<*byte>(0)) {
+            io::print_err("Warning: Could not extract module name from %d\n", 
+                        [cast<int>(filepath)]);
+            continue;
+        }
+        
+        let dep_count: int = 0;
+        let deps: **byte = find_imports(filepath, &dep_count);
+        
+        g_file_paths[g_graph_size] = filepath;
+        g_module_names[g_graph_size] = module_name;
+        g_dependencies[g_graph_size] = deps;
+        g_dep_counts[g_graph_size] = dep_count;
+        g_visited[g_graph_size] = 0;
+        g_in_stack[g_graph_size] = 0;
+        
+        g_graph_size = g_graph_size + 1;
+    }
+    
+    free(files);
+    
+    return g_graph_size;
+}
+
+const file_exists -> fn (filepath: *byte) int {
+    let content: *byte = io::read_file(filepath);
+    if (content != cast<*byte>(0)) {
+        free(content);
+        return 1;
+    }
+    return 0;
+}
+
+const has_dep -> fn (slice_ptr: *Slice, slice_count: int, dep_path: *byte) int {
+    loop [i: int = 0](i < slice_count) : (i = i + 1) {
+        if (string::strcmp(slice_ptr[i].ptr, dep_path) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+const build -> fn (config: *BuildConfig) int {
+    io::print("\n=== Building Luma Project ===\n", [io::NULL_FORMAT_ARG]);
+    io::print("Entry point: %s\n", [io::str_arg(config.entry_point)]);
+    io::print("Output name: %s\n", [io::str_arg(config.output_name)]);
+    
+    if (file_exists(config.entry_point) == 0) {
+        io::print_err("\nError: Entry point file '%s' does not exist\n", 
+                     [cast<int>(config.entry_point)]);
+        return 1;
+    }
+    
+    if (config.verbose == 1) io::print("\nAnalyzing dependencies...\n", [io::NULL_FORMAT_ARG]);
+    if (build_dep_graph(".") == 0) return 1;
+
+    io::print("Compiling modules...\n", [io::NULL_FORMAT_ARG]);
+
+    // Collect command parts as slices
+    let slice: *Slice = cast<*Slice>(alloc(200 * sizeof<Slice>));
+    defer { free(slice); }
+
+    // "luma "
+    slice[0] = slice.null_terminated_slice("luma ");
+
+    // Configure entry point + space
+    slice[1] = slice.null_terminated_slice(config.entry_point);
+    slice[2] = slice.null_terminated_slice(" ");
+
+    // "-l "
+    // make sure the graph size is greater then 1 
+    if (g_graph_size > 1) slice[3] = slice.null_terminated_slice("-l ");
+
+    // dependencies
+    let slice_count: int = 4;
+    loop [i: int = 0](i < g_graph_size) : (i = i + 1) {
+        loop [j: int = 0](j < g_dep_counts[i]) : (j = j + 1) {
+            let dep_name: **byte = g_dependencies[i];
+
+            let dep_path: *byte;
+            if (string::strncmp(dep_name[j], "std_", 4) == 0) {
+                let dep_len: int = string::strlen(dep_name[j]);      // e.g. "std_vector"
+                let total_len: int = 4 + (dep_len - 4) + 3 + 1;      // "std/" + name + ".lx" + 0
+
+                dep_path = cast<*byte>(alloc(total_len * sizeof<byte>));
+
+                // "std/"
+                dep_path[0] = 's';
+                dep_path[1] = 't';
+                dep_path[2] = 'd';
+                dep_path[3] = '/';
+
+                let tmp: *byte = dep_name[j];
+
+                // copy name after "std_"
+                mem::memcpy(
+                    cast<*void>(&dep_path[4]),
+                    cast<*void>(&tmp[4]),
+                    dep_len - 4
+                );
+
+                // append ".lx"
+                dep_path[4 + (dep_len - 4) + 0] = '.';
+                dep_path[4 + (dep_len - 4) + 1] = 'l';
+                dep_path[4 + (dep_len - 4) + 2] = 'x';
+                dep_path[4 + (dep_len - 4) + 3] = '\0';
+            } else {
+                dep_path = dep_name[j];
+            }
+
+            if (string::strncmp(dep_path, "std/", 4) == 0 &&
+                has_dep(slice, slice_count, dep_path) == 0) {
+                slice[slice_count++] = slice.null_terminated_slice(dep_path);
+                slice[slice_count++] = slice.null_terminated_slice(" ");
+            }
+        }
+        if (string::strcmp(g_file_paths[i], config.entry_point) == 0) continue;
+
+        // file path + space
+        slice[slice_count++] = slice.null_terminated_slice(g_file_paths[i]);
+        slice[slice_count++] = slice.null_terminated_slice(" ");
+    }
+
+    // "-name " + output_name
+    slice[slice_count++] = slice.null_terminated_slice("-name ");
+    slice[slice_count++] = slice.null_terminated_slice(config.output_name);
+    slice[slice_count] = NULL_BYTE;
+
+    // Concatenate all parts into a single String
+    let cmd_str: String; 
+    cmd_str = cmd_str.concat_strs(slice, slice_count);
+    defer { string::free_string(&cmd_str); }
+
+    io::print("Executing command:\n%s\n\t", [io::str_arg(cmd_str.slice.ptr)]);
+
+    let compile_result: int = system(cmd_str.slice.ptr);
+    if (compile_result != 0) {
+        io::print_err("\nError: Build failed with exit code %d\n\n", 
+                     [compile_result]);
+        return compile_result;
+    }
+
+    io::print("\nBuild completed successfully. Output: %s\n\n", 
+             [io::str_arg(config.output_name)]);
+
+    return 0;
+}
+
+const clean -> fn () int {
+    io::print("\n=== Cleaning Build Artifacts ===\n", [io::NULL_FORMAT_ARG]);
+    system("rm -f *.o");
+    system("rm -f main");
+    system("rm -f obj");
+    system("rm -f /tmp/luma_*.txt");
+    io::print("Done.\n\n", [io::NULL_FORMAT_ARG]);
+    return 0;
+}
+
+const show_deps -> fn () int {
+    io::print("\n=== Dependency Tree ===\n", [io::NULL_FORMAT_ARG]);
+    
+    if (build_dep_graph(".") == 0) {
+        return 1;
+    }
+    
+    io::print("\nModule dependencies:\n", [io::NULL_FORMAT_ARG]);
+    
+    loop [i: int = 0](i < g_graph_size) : (i = i + 1) {
+        io::print("\n  %s", [io::str_arg(g_module_names[i])]);
+
+        if (g_dep_counts[i] == 0) {
+            io::print(" (has no dependencies)", [io::NULL_FORMAT_ARG]);
+            continue; 
+        }
+
+        io::print(" depends on:", [io::NULL_FORMAT_ARG]);
+        loop [j: int = 0](j < g_dep_counts[i]) : (j = j + 1) {
+            let dep_name: **byte = g_dependencies[i];
+            io::print("\n    - %s", [io::str_arg(dep_name[j])]);
+        }
+    }
+    
+    io::print("\n", [io::NULL_FORMAT_ARG]);
+    return 0;
+}
+
+const read_line -> fn (buffer: *byte, max_len: int) void {
+    let i: int = 0;
+    loop (i < max_len - 1) {
+        let c: byte = input<byte>("");
+        if (c == '\n' || c == '\0') {
+            break;
+        }
+        buffer[i] = c;
+        i = i + 1;
+    }
+    buffer[i] = '\0';
+}
+
+pub const main -> fn () int {
+    io::print("\n========================================\n", [io::NULL_FORMAT_ARG]);
+    io::print("         Luma Build System v1.0         \n", [io::NULL_FORMAT_ARG]);
+    io::print("========================================\n", [io::NULL_FORMAT_ARG]);
+    
+    output("\nCommand (build/clean/deps): ");
+    
+    let cmd_buffer: [byte; 64];
+    read_line(cast<*byte>(&cmd_buffer), 64);
+    let cmd: *byte = cast<*byte>(&cmd_buffer);
+    
+    if (string::strcmp(cmd, "build") == 0) {
+        output("Entry point file (press Enter for 'main.lx'): ");
+        
+        let entry_buffer: [byte; 256];
+        read_line(cast<*byte>(&entry_buffer), 256);
+        
+        let entry_point: *byte;
+        if (entry_buffer[0] == '\0') {
+            entry_point = "main.lx";
+        } else {
+            entry_point = cast<*byte>(&entry_buffer);
+        }
+        
+        output("Output binary name (press Enter for 'main'): ");
+        
+        let output_buffer: [byte; 256];
+        read_line(cast<*byte>(&output_buffer), 256);
+        
+        let output_name: *byte;
+        if (output_buffer[0] == '\0') {
+            output_name = "main";
+        } else {
+            output_name = cast<*byte>(&output_buffer);
+        }
+        
+        let config: BuildConfig = BuildConfig {
+            entry_point: entry_point,
+            output_name: output_name,
+            stdlib_path: "std",
+            optimize: 0,
+            debug_symbols: 1,
+            verbose: 1
+        };
+        
+        return build(&config);
+        
+    } elif (string::strcmp(cmd, "clean") == 0) {
+        return clean();
+        
+    } elif (string::strcmp(cmd, "deps") == 0) {
+        return show_deps();
+        
+    } else {
+        io::print("\nUnknown command: %s\n", [io::str_arg(cmd)]);
+        io::print("\nUsage:\n", [io::NULL_FORMAT_ARG]);
+        io::print("  build - Build the project\n", [io::NULL_FORMAT_ARG]);
+        io::print("  clean - Clean build artifacts\n", [io::NULL_FORMAT_ARG]);
+        io::print("  deps  - Show dependency tree\n\n", [io::NULL_FORMAT_ARG]);
+        return 1;
+    }
+    
+    return 0;
+}
