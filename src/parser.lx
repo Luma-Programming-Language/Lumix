@@ -1,0 +1,95 @@
+@module "parser" 
+
+@use "std_string" as string
+@use "std_memory" as mem
+@use "utility" as util
+@use "std_io" as io
+
+const USE_DIRECTIVE_LEN: int = 4;
+const MAX_DEPS: int = 200;
+
+#returns_ownership
+pub const parse_file_line -> fn (file_list: *byte, start: int, end: int) *byte {
+    let line_len: int = end - start;
+    if (line_len <= 0) return cast<*byte>(0);
+    
+    return util::clean_dotslash_prefix(util::copy_string(file_list, start, line_len));
+}
+
+const skip_whitespace -> fn (content: *byte, pos: int, max_len: int) int {
+    loop (pos < max_len && (content[pos] == ' ' || content[pos] == '\t')) : (pos = pos + 1) {}
+    return pos;
+}
+
+const is_at_line_start -> fn (content: *byte, pos: int) int {
+    if (pos == 0) return 1;
+    
+    let check_pos: int = pos - 1;
+    loop (check_pos >= 0) {
+        if (content[check_pos] == '\n') return 1;
+        if (content[check_pos] != ' ' && content[check_pos] != '\t') return 0;
+        check_pos = check_pos - 1;
+    }
+    return 1;
+}
+
+#returns_ownership
+pub const find_imports -> fn (file_path: *byte, out_count: *int) **byte {
+    let imports: **byte = cast<**byte>(alloc(MAX_DEPS * sizeof<*byte>));
+    *out_count = 0;
+    
+    let content: *byte = io::read_file(file_path);
+    if (content == cast<*byte>(0)) return imports;
+    
+    defer { free(content); }
+    
+    let len: int = string::strlen(content);
+    let i: int = 0;
+
+    loop (i < len) {
+        if (i + 1 < len && content[i] == '/' && content[i + 1] == '/') {
+            loop (i < len && content[i] != '\n') : (i = i + 1) {}
+            continue;
+        }
+        
+        if (i + USE_DIRECTIVE_LEN <= len && content[i] == '@') {
+            if (is_at_line_start(content, i) == 0) {
+                i = i + 1;
+                continue;
+            }
+            
+            let matches: int = 1;
+            let use_str: *byte = "@use";
+            
+            loop [j: int = 0](j < USE_DIRECTIVE_LEN) : (j = j + 1) {
+                if (content[i + j] != use_str[j]) {
+                    matches = 0;
+                    break;
+                }
+            }
+            
+            if (matches == 1) {
+                i = i + USE_DIRECTIVE_LEN;
+                i = skip_whitespace(content, i, len);
+
+                if (i < len && content[i] == '"') {
+                    i = i + 1;
+                    let mod_start: int = i;
+                    
+                    loop (i < len && content[i] != '"') : (i = i + 1) {}
+                    
+                    let mod_len: int = i - mod_start;
+                    if (mod_len > 0 && *out_count < MAX_DEPS) {
+                        imports[*out_count] = util::copy_string(content, mod_start, mod_len);
+                        *out_count = *out_count + 1;
+                    }
+                }
+                continue;
+            }
+        }
+        
+        i = i + 1;
+    }
+    
+    return imports;
+}

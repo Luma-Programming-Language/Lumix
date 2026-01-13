@@ -1,0 +1,43 @@
+@module "module"
+
+@use "std_string" as string
+@use "utility" as util
+
+pub const FILE_EXT_LEN: int = 3;
+
+const find_last_slash -> fn (filepath: *byte, len: int) int {
+    let last_slash: int = -1;
+    loop [i: int = 0](i < len) : (i = i + 1) {
+        if (filepath[i] == '/') last_slash = i;
+    }
+    return last_slash;
+}
+
+const starts_with_std -> fn (filepath: *byte) int {
+    if (filepath[0] == 's' && filepath[1] == 't' && 
+        filepath[2] == 'd' && filepath[3] == '/') return 1;
+    return 0;
+}
+
+#returns_ownership
+pub const extract_module_name -> fn (filepath: *byte) *byte {
+    let len: int = string::strlen(filepath);
+    
+    if (util::has_extension(filepath, ".lx") == 0) return cast<*byte>(0);
+    
+    let last_slash: int = find_last_slash(filepath, len);
+    let name_start: int = 0;
+    
+    if (starts_with_std(filepath) == 1) {
+        name_start = 0;
+    } else {
+        name_start = last_slash + 1;
+    }
+    
+    let name_end: int = len - FILE_EXT_LEN - 1;  // Remove ".lx"
+    let name_len: int = name_end - name_start;
+    
+    if (name_len <= 0) return cast<*byte>(0);
+    
+    return util::copy_string(filepath, name_start, name_len);
+}

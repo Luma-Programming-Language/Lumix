@@ -1,0 +1,94 @@
+@module "file_system"
+
+@use "std_string" as string
+@use "std_memory" as mem
+@use "parser" as parser
+@use "utility" as util
+@use "std_io" as io
+
+const TEMP_CWD_FILE: *byte = "/tmp/luma_cwd.txt";
+const TEMP_FILES_LIST: *byte = "/tmp/luma_files.txt";
+
+const MAX_PATH_LEN: int = 1024;
+const MAX_CMD_LEN: int = 512;
+
+pub const MAX_FILES: int = 500;
+
+#returns_ownership
+pub const get_cwd -> fn () *byte {
+    let cwd: *byte = cast<*byte>(alloc(MAX_PATH_LEN));
+    system("pwd > /tmp/luma_cwd.txt");
+    
+    let result: *byte = io::read_file(TEMP_CWD_FILE);
+    if (result != cast<*byte>(0)) {
+        util::strip_trailing_newline(result);
+        let len: int = string::strlen(result);
+        mem::memcpy(cast<*void>(cwd), cast<*void>(result), len);
+        free(result);
+    }
+    
+    system("rm -f /tmp/luma_cwd.txt");
+    return cwd;
+}
+
+const execute_find_command -> fn (path: *byte) void {
+    let scan_cmd: *byte = cast<*byte>(alloc(MAX_CMD_LEN));
+    defer { free(scan_cmd); }
+    
+    scan_cmd[0] = '\0';
+    string::cat(scan_cmd, "find ", path);
+    string::cat(scan_cmd, " -name '*.lx' -type f 2>/dev/null > ", TEMP_FILES_LIST);
+    system(scan_cmd);
+}
+
+const fallback_ls_scan -> fn () void {
+    system("rm -f /tmp/luma_files.txt 2>/dev/null");
+    system("ls *.lx 2>/dev/null > /tmp/luma_files.txt");
+    system("ls */*.lx 2>/dev/null >> /tmp/luma_files.txt");
+    system("ls */*/*.lx 2>/dev/null >> /tmp/luma_files.txt");
+    system("ls */*/*/*.lx 2>/dev/null >> /tmp/luma_files.txt");
+}
+
+#returns_ownership
+pub const scan_directory -> fn (path: *byte, out_count: *int) **byte {
+    let files: **byte = cast<**byte>(alloc(MAX_FILES * sizeof<*byte>));
+    *out_count = 0;
+    
+    system("rm -f /tmp/luma_files.txt 2>/dev/null");
+    execute_find_command(path);
+    
+    let file_list: *byte = io::read_file(TEMP_FILES_LIST);
+    defer { free(file_list); }
+    
+    if (file_list == cast<*byte>(0) || file_list[0] == '\0') {
+        fallback_ls_scan();
+        file_list = io::read_file(TEMP_FILES_LIST);
+        if (file_list == cast<*byte>(0) || file_list[0] == '\0') {
+            return files;
+        }
+    }
+    
+    let i: int = 0;
+    let line_start: int = 0;
+    
+    loop (file_list[i] != '\0' && *out_count < MAX_FILES) {
+        if (file_list[i] == '\n') {
+            if (parser::parse_file_line(file_list, line_start, i) != cast<*byte>(0)) {
+                files[*out_count] = parser::parse_file_line(file_list, line_start, i);
+                *out_count = *out_count + 1;
+            }
+            line_start = i + 1;
+        }
+        i = i + 1;
+    }
+    
+    if (i > line_start && *out_count < MAX_FILES) {
+        if (parser::parse_file_line(file_list, line_start, i) != cast<*byte>(0)) {
+            files[*out_count] = parser::parse_file_line(file_list, line_start, i);
+            *out_count = *out_count + 1;
+        }
+    }
+    
+    system("rm -f /tmp/luma_files.txt 2>/dev/null");
+    return files;
+}

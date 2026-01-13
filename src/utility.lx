@@ -1,0 +1,83 @@
+@module "utility"
+
+@use "std_string" as string
+@use "std_memory" as mem
+@use "std_io" as io
+
+pub const file_exists -> fn (filepath: *byte) int {
+    let content: *byte = io::read_file(filepath);
+    defer { free(content); }
+ 
+    if (content != cast<*byte>(0)) return 1;
+    return 0; 
+}
+
+pub const strip_trailing_newline -> fn (s: *byte) void {
+    let len: int = string::strlen(s);
+    if (len > 0 && s[len-1] == '\n') {
+        s[len-1] = '\0';
+    }
+}
+
+pub const has_extension -> fn (filepath: *byte, ext: *byte) int {
+    let len: int = string::strlen(filepath);
+    let ext_len: int = string::strlen(ext);
+    
+    if (len < ext_len) return 0;
+    
+    loop [i: int = 0](i < ext_len) : (i = i + 1) {
+        if (filepath[len - ext_len + i] != ext[i]) return 0;
+    }
+    return 1;
+}
+
+#returns_ownership
+pub const clean_dotslash_prefix -> fn (filepath: *byte) *byte {
+    let len: int = string::strlen(filepath);
+    
+    if (len >= 2 && filepath[0] == '.' && filepath[1] == '/') {
+        let clean_path: *byte = cast<*byte>(alloc((len - 1) * sizeof<byte>));
+        mem::memcpy(cast<*void>(clean_path), cast<*void>(&filepath[2]), len - 2);
+        clean_path[len - 2] = '\0';
+        free(filepath);
+        return clean_path;
+    }
+    
+    return filepath;
+}
+
+#returns_ownership
+pub const copy_string -> fn (src: *byte, start: int, len: int) *byte {
+    let dest: *byte = cast<*byte>(alloc((len + 1) * sizeof<byte>));
+    mem::memcpy(cast<*void>(dest), cast<*void>(&src[start]), len);
+    dest[len] = '\0';
+    return dest;
+}
+
+// New function to check if a file contains the main function
+pub const contains_main_function -> fn (filepath: *byte) int {
+    let content: *byte = io::read_file(filepath);
+    if (content == cast<*byte>(0)) return 0;
+    
+    defer { free(content); }
+    
+    let len: int = string::strlen(content);
+    let pattern: *byte = "pub const main -> fn ()";
+    let pattern_len: int = string::strlen(pattern);
+    
+    let i: int = 0;
+    loop (i < len - pattern_len) {
+        let matches: int = 1;
+        loop [j: int = 0](j < pattern_len) : (j = j + 1) {
+            if (content[i + j] != pattern[j]) {
+                matches = 0;
+                break;
+            }
+        }
+        
+        if (matches == 1) return 1;
+        i = i + 1;
+    }
+    
+    return 0;
+}

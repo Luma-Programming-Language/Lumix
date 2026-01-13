@@ -1,0 +1,22 @@
+@module "user_input"
+
+const read_line -> fn (buffer: *byte, max_len: int) void {
+    let i: int = 0;
+    loop (i < max_len - 1) {
+        let c: byte = input<byte>("");
+        if (c == '\n' || c == '\0') break;
+        buffer[i] = c;
+        i = i + 1;
+    }
+    buffer[i] = '\0';
+}
+
+pub const get_user_input -> fn (prompt: *byte, default_value: *byte, buffer: *byte, buffer_size: int) *byte {
+    output(prompt);
+    read_line(buffer, buffer_size);
+    
+    if (buffer[0] == '\0') {
+        return default_value;
+    }
+    return buffer;
+}
