@@ -1,3 +1,5 @@
+/// luma src/lumix.lx -l std/string.lx std/memory.lx std/io.lx src/file_system.lx src/getch.lx std/sys.lx src/module.lx src/parser.lx src/user_input.lx src/utility.lx -name lumix
+
 @module "build"
 
 @use "std_string" as string
