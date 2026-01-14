@@ -1,0 +1,90 @@
+@module "getch"
+
+@use "std_io" as io
+
+// Platform detection constants
+const PLATFORM_UNIX: int = 1;
+const PLATFORM_WINDOWS: int = 2;
+
+// Detect platform at compile time based on typical indicators
+// This is a simplified approach - you may need to adjust based on your compiler's defines
+const detect_platform -> fn () int {
+    // For now, we'll assume Unix/Linux/Mac
+    // In a real implementation, youd check compiler defines
+    return PLATFORM_UNIX;
+}
+
+// Unix/Linux/Mac implementation using stty
+pub const getch_unix -> fn () byte {
+    // Save current terminal settings
+    system("stty -echo -icanon min 1 time 0");
+    
+    // Read single character
+    let c: byte = input<byte>("");
+    
+    // Restore terminal settings
+    system("stty echo icanon");
+    
+    return c;
+}
+
+// Windows implementation would use conio.h _getch()
+// Since Luma may not have direct C library bindings, we use a workaround
+pub const getch_windows -> fn () byte {
+    // On Windows, you might need to call a C function or use
+    // a different approach. For now, this is a placeholder.
+    // You could compile a small C helper and call it via system()
+    
+    let c: byte = input<byte>("");
+    return c;
+}
+
+// Cross-platform getch function
+pub const getch -> fn () byte {
+    let platform: int = detect_platform();
+    
+    if (platform == PLATFORM_UNIX) {
+        return getch_unix();
+    } else {
+        return getch_windows();
+    }
+}
+
+// Wait for any key press
+pub const wait_for_key -> fn () void {
+    io::print("Press any key to continue...", [io::NULL_FORMAT_ARG]);
+    getch();
+    io::print("\n", [io::NULL_FORMAT_ARG]);
+}
+
+// Get yes/no answer
+pub const get_yes_no -> fn (prompt: *byte) int {
+    io::print("%s (y/n): ", [io::str_arg(prompt)]);
+    
+    let c: byte = getch();
+    io::print("%c\n", [io::byte_arg(c)]);
+    
+    if (c == 'y' || c == 'Y') return 1;
+    if (c == 'n' || c == 'N') return 0;
+    
+    // Invalid input, ask again
+    io::print("Invalid input. ", [io::NULL_FORMAT_ARG]);
+    return get_yes_no(prompt);
+}
+
+// Get a single character choice from a set of options
+pub const get_choice -> fn (prompt: *byte, valid_chars: *byte, num_chars: int) byte {
+    io::print("%s ", [io::str_arg(prompt)]);
+    
+    let c: byte = getch();
+    io::print("%c\n", [io::byte_arg(c)]);
+    
+    // Check if character is valid
+    loop [i: int = 0](i < num_chars) : (i = i + 1) {
+        if (c == valid_chars[i]) return c;
+    }
+    
+    // Invalid choice
+    io::print("Invalid choice. ", [io::NULL_FORMAT_ARG]);
+    return get_choice(prompt, valid_chars, num_chars);
+}

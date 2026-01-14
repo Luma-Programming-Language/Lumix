@@ -9,6 +9,7 @@
 @use "utility" as util
 @use "std_sys" as sys
 @use "std_io" as io
+@use "getch" as gc
 
 // ============================================================================
 // Constants & Type Definitions
@@ -293,11 +294,18 @@ const build -> fn (config: *BuildConfig) int {
 
 const clean -> fn () int {
     io::print("\n=== Cleaning Build Artifacts ===\n", [io::NULL_FORMAT_ARG]);
-    system("rm -f *.o");
-    system("rm -f main");
-    system("rm -f obj");
-    system("rm -f /tmp/luma_*.txt");
-    io::print("Done.\n\n", [io::NULL_FORMAT_ARG]);
+    
+    
+    let confirm: int = gc::get_yes_no("Are you sure you want to clean build artifacts?");
+    if (confirm == 0) {
+        io::print("Clean operation cancelled.\n\n", [io::NULL_FORMAT_ARG]);
+        return 0;
+    }
+
+    io::print("Cleaning...\n", [io::NULL_FORMAT_ARG]);
+    system("sudo rm -rf obj main /tmp/luma_*.txt");
+
+    io::print("Cleaned build artifacts successfully.\n\n", [io::NULL_FORMAT_ARG]);
     return 0;
 }
 
@@ -333,7 +341,7 @@ const show_deps -> fn () int {
 
 pub const main -> fn () int {
     io::print("\n========================================\n", [io::NULL_FORMAT_ARG]);
-    io::print("         Luma Build System v1.5         \n", [io::NULL_FORMAT_ARG]);
+    io::print("         Luma Build System v1.6         \n", [io::NULL_FORMAT_ARG]);
     io::print("========================================\n", [io::NULL_FORMAT_ARG]);
     
     let cmd_buffer: [byte; 64];
