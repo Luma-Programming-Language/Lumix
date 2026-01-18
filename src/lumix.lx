@@ -7,15 +7,17 @@
 @use "module" as module
 @use "std_memory" as mem
 @use "file_system" as fs
-@use "parser" as parser
+@use "parse" as parser
 @use "utility" as util
 @use "std_sys" as sys
 @use "std_io" as io
 @use "getch" as gc
 
-// ============================================================================
-// Constants & Type Definitions
-// ============================================================================
+@use "std_vector" as vec
+@use "symbols" as sym
+@use "lexer" as lexer
+@use "parser" as p
+@use "vm" as vm
 
 const BuildConfig -> struct {
     entry_point: *byte,
@@ -29,21 +31,13 @@ const BuildConfig -> struct {
 const NULL_BYTE: Slice = Slice { ptr: "", len: 0 };
 const STD_PREFIX_LEN: int = 4;
 
-// ============================================================================
-// Global State (Dependency Graph)
-// ============================================================================
-
+let g_dependencies: [**byte; 100];
 let g_module_names: [*byte; 100];
 let g_file_paths: [*byte; 100];
-let g_dependencies: [**byte; 100];
 let g_dep_counts: [int; 100];
-let g_visited: [int; 100];
 let g_in_stack: [int; 100];
+let g_visited: [int; 100];
 let g_graph_size: int = 0;
-
-// ============================================================================
-// Entry Point Detection
-// ============================================================================
 
 #returns_ownership
 const find_entry_point -> fn (scan_path: *byte) *byte {
@@ -75,10 +69,6 @@ const find_entry_point -> fn (scan_path: *byte) *byte {
     
     return entry_point;
 }
-
-// ============================================================================
-// Dependency Graph Building
-// ============================================================================
 
 #takes_ownership
 const build_dep_graph -> fn (scan_path: *byte) int {
@@ -136,10 +126,6 @@ const build_dep_graph -> fn (scan_path: *byte) int {
     free(files);
     return g_graph_size;
 }
-
-// ============================================================================
-// Build Command Construction
-// ============================================================================
 
 const has_dep -> fn (slice_ptr: *Slice, slice_count: int, dep_path: *byte) int {
     loop [i: int = 0](i < slice_count) : (i = i + 1) {
@@ -244,10 +230,6 @@ const build_compile_command -> fn (config: *BuildConfig) String {
     return cmd_str;
 }
 
-// ============================================================================
-// Build Commands
-// ============================================================================
-
 const build -> fn (config: *BuildConfig) int {
     io::print("\n=== Building Luma Project ===\n", [io::NULL_FORMAT_ARG]);
     io::print("Entry point: %s\n", [io::str_arg(config.entry_point)]);
@@ -337,17 +319,13 @@ const show_deps -> fn () int {
     return 0;
 }
 
-// ============================================================================
-// Main Entry Point
-// ============================================================================
-
 pub const main -> fn () int {
     io::print("\n========================================\n", [io::NULL_FORMAT_ARG]);
     io::print("         Luma Build System v1.6         \n", [io::NULL_FORMAT_ARG]);
     io::print("========================================\n", [io::NULL_FORMAT_ARG]);
     
     let cmd_buffer: [byte; 64];
-    ui::get_user_input("\nCommand (build/clean/deps): ", "", 
+    ui::get_user_input("\nCommand (build/script/clean/deps): ", "", 
                    cast<*byte>(&cmd_buffer), 64);
     let cmd: *byte = cast<*byte>(&cmd_buffer);
     
@@ -399,18 +377,52 @@ pub const main -> fn () int {
         
         return result;
         
+    } elif (string::strcmp(cmd, "script") == 0) {
+        let buffer: [byte; 64];
+        ui::get_user_input("Path to build file: ", "", cast<*byte>(&buffer), 64);
+        let c: *byte = cast<*byte>(&buffer);
+
+        let token_vector: Vector = vec::create_vector(sizeof<Token>);
+        let path: *byte = c;
+        let file: *byte = io::read_file(path);
+        defer { 
+            vec::free_vector(&token_vector);
+            free(file); 
+        }
+
+        let lx: Lexer = lexer::create_lexer(file);
+        loop {
+            let tok: Token = lexer::next_token(&lx);
+            if (tok.kind == sym::TokenKind::EOF) break;
+            token_vector.push_back(cast<*void>(&tok));
+        }
+
+        let tokens: *Token = cast<*Token>(token_vector.data);
+        let psr: Parser = p::create_parser(tokens, token_vector.size);
+        defer { p::free_parser(&psr); }
+
+        p::parse(&psr);
+
+        // Create VM and assemble the bytecode
+        let virtual_machine: VM = vm::create_vm();
+        defer { vm::free_vm(&virtual_machine); }
+
+        p::assemble(&psr, &virtual_machine);
+
+        // Execute!
+        vm::vm_execute(&virtual_machine);
     } elif (string::strcmp(cmd, "clean") == 0) {
         return clean();
         
     } elif (string::strcmp(cmd, "deps") == 0) {
         return show_deps();
-        
     } else {
-        io::print("\nUnknown command: %s\n", [io::str_arg(cmd)]);
-        io::print("\nUsage:\n", [io::NULL_FORMAT_ARG]);
-        io::print("  build - Build the project\n", [io::NULL_FORMAT_ARG]);
-        io::print("  clean - Clean build artifacts\n", [io::NULL_FORMAT_ARG]);
-        io::print("  deps  - Show dependency tree\n\n", [io::NULL_FORMAT_ARG]);
+        io::print("\nUnknown command: %s
+        Usage:
+            build - Build the project
+            clean - Clean build artifacts
+            deps  - Show dependency tree\n", 
+        [io::str_arg(cmd)]);
         return 1;
     }
     

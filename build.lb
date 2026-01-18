@@ -1,0 +1,4 @@
+main -> {
+    let name = "lumix";
+    __build(name, 0, true);
+}

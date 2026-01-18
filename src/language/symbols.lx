@@ -1,0 +1,128 @@
+@module "symbols"
+
+@use "std_string" as string
+
+pub const Opcode -> enum {
+  OP_PUSH,  
+  OP_POP,   
+  OP_DUP,   
+  OP_ADD,   
+  OP_SUB,   
+  OP_MUL,   
+  OP_DIV,   
+  OP_EXP,   
+  OP_MOD,
+  OP_PRINT, 
+  OP_JMP,   
+  OP_JZ,    
+  OP_JNZ,   
+  OP_LT, 
+  OP_GT,
+  OP_EQ,    
+  OP_NEG,   
+  OP_HALT   
+};
+
+pub const TokenKind -> enum {
+  Number,
+  LParen,
+  RParen,
+  At,
+  Semi,
+
+  Plus,
+  Minus,
+  Star,
+  Slash,
+  Carrot,
+  Mod,
+  Less,
+  Greater,
+  
+  Ident,
+  Let,
+  Print,
+  If,
+  Else,
+  Main,
+  True,
+  False,
+  __Build,
+
+  EOF,
+};
+
+pub const Lexer -> struct {
+  line: int, col: int,
+  current: *byte,
+  src: *byte,
+};
+
+pub const Token -> struct {
+  val: *byte,
+  kind: int,
+  len: int,
+};
+
+pub const VM -> struct {
+  stack: *int, 
+  program: *byte,
+  sp: int, // stack pointer
+  pc: int, // program counter
+};
+
+const SINGLE_SYMBOL_COUNT: int = 12;
+const SingleSymbol -> struct { val: byte, kind: int }; 
+const single_symbol_map: [SingleSymbol; 12] = [
+  SingleSymbol { val: '(', kind: TokenKind::LParen  }, 
+  SingleSymbol { val: ')', kind: TokenKind::RParen  },
+  SingleSymbol { val: ';', kind: TokenKind::Semi    },
+  SingleSymbol { val: '@', kind: TokenKind::At      },
+  SingleSymbol { val: '+', kind: TokenKind::Plus    }, 
+  SingleSymbol { val: '-', kind: TokenKind::Minus   },
+  SingleSymbol { val: '*', kind: TokenKind::Star    }, 
+  SingleSymbol { val: '/', kind: TokenKind::Slash   },
+  SingleSymbol { val: '^', kind: TokenKind::Carrot  },
+  SingleSymbol { val: '%', kind: TokenKind::Mod     },
+  SingleSymbol { val: '<', kind: TokenKind::Less    },
+  SingleSymbol { val: '>', kind: TokenKind::Greater },
+];
+
+pub const lookup_single -> fn (val: byte) int {
+  loop [i: int = 0](i < SINGLE_SYMBOL_COUNT) : (++i) {
+    if (single_symbol_map[i].val == val) 
+      return single_symbol_map[i].kind;
+  }
+  return -1;
+}
+
+const KEYWORD_SYMBOL_COUNT: int = 8;
+const KeywordSymbol -> struct { text: *byte, kind: int };
+const keyword_symbol_map: [KeywordSymbol; 8] = [
+  KeywordSymbol { text: "let",      kind: TokenKind::Let      },
+  KeywordSymbol { text: "print",    kind: TokenKind::Print    },
+  KeywordSymbol { text: "if",       kind: TokenKind::If       },
+  KeywordSymbol { text: "else",     kind: TokenKind::Else     },
+  KeywordSymbol { text: "main",     kind: TokenKind::Main     },
+  KeywordSymbol { text: "true",     kind: TokenKind::True     },
+  KeywordSymbol { text: "false",    kind: TokenKind::False    },
+  KeywordSymbol { text: "__build",  kind: TokenKind::__Build  },
+];
+
+#returns_ownership
+pub const create_word -> fn (start: *byte, len: int) *byte {
+  let word: *byte = cast<*byte>(alloc((len + 1) * sizeof<byte>));
+
+  loop [i: int = 0](i < len) : (++i) { word[i] = start[i]; }
+  word[len] = '\0';
+
+  return word;
+}
+
+pub const lookup_keyword -> fn (val: *byte) int {
+  loop [i: int = 0](i < KEYWORD_SYMBOL_COUNT) : (++i) {
+    if (string::strcmp(keyword_symbol_map[i].text, val) == 0)
+      return keyword_symbol_map[i].kind;
+  }
+  return -1;
+}

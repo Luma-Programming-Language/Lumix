@@ -1,4 +1,4 @@
-@module "parser" 
+@module "parse" 
 
 @use "std_string" as string
 @use "std_memory" as mem

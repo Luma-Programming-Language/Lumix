@@ -2,7 +2,7 @@
 
 @use "std_string" as string
 @use "std_memory" as mem
-@use "parser" as parser
+@use "parse" as parser
 @use "utility" as util
 @use "std_io" as io
 
