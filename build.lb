@@ -1,4 +1,31 @@
-main -> {
-    let name = "lumix";
-    __build(name, 0, true);
+let project = "lumix";
+let version = "1.6";
+let optimize = true;
+
+// Find all source files
+let sources = find_sources("src").filter(|s| !s.contains("test"));
+let std_libs = scan_directory("std").filter(|s| s.ends_with(".lx"));
+
+// Auto-detect entry point
+let entry = sources.find(|s| contains_main(s)) ?? "src/main.lx";
+
+print("Building {project} v{version}");
+print("Entry point: {entry}");
+print("Found {sources.length} source files");
+
+// Build configuration
+target main :: {
+    entry = entry,
+    output = project,
+    sources = sources,
+    libs = std_libs,
+    optimize = optimize
+}
+
+// Execute build
+if main.compile() {
+    print("✓ Build successful: {main.output}");
+} else {
+    print("✗ Build failed");
+    exit(1);
 }

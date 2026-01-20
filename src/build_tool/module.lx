@@ -34,7 +34,7 @@ pub const extract_module_name -> fn (filepath: *byte) *byte {
         name_start = last_slash + 1;
     }
     
-    let name_end: int = len - FILE_EXT_LEN - 1;  // Remove ".lx"
+    let name_end: int = len - FILE_EXT_LEN;  // Remove ".lx"
     let name_len: int = name_end - name_start;
     
     if (name_len <= 0) return cast<*byte>(0);

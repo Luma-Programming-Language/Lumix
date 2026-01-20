@@ -1,8 +1,8 @@
 /// luma src/lumix.lx -l std/string.lx std/memory.lx std/io.lx src/file_system.lx src/getch.lx std/sys.lx src/module.lx src/parser.lx src/user_input.lx src/utility.lx -name lumix
-
 @module "build"
 
 @use "std_string" as string
+@use "std_termfx" as term
 @use "user_input" as ui
 @use "module" as module
 @use "std_memory" as mem
@@ -223,8 +223,14 @@ const build_compile_command -> fn (config: *BuildConfig) String {
     // Add output name
     slice[slice_count++] = slice.null_terminated_slice("-name ");
     slice[slice_count++] = slice.null_terminated_slice(config.output_name);
+
+    // Add optimiztion
+    slice[slice_count++] = slice.null_terminated_slice(" -O");
+    slice[slice_count++] = slice.null_terminated_slice(string::from_int(config.optimize));
+
     slice[slice_count] = NULL_BYTE;
-    
+
+
     let cmd_str: String;
     cmd_str = cmd_str.concat_strs(slice, slice_count);
     return cmd_str;
@@ -300,8 +306,9 @@ const show_deps -> fn () int {
     
     io::print("\nModule dependencies:\n", [io::NULL_FORMAT_ARG]);
     
-    loop [i: int = 0](i < g_graph_size) : (i = i + 1) {
-        io::print("\n  %s", [io::str_arg(g_module_names[i])]);
+    loop [i: int = 0](i < g_graph_size) : (++i) {
+        io::print("\n  %s(%s)%s", [io::str_arg(term::CYAN), io::str_arg(g_module_names[i]), 
+                                   io::str_arg(term::RESET)]);
 
         if (g_dep_counts[i] == 0) {
             io::print(" (no dependencies)", [io::NULL_FORMAT_ARG]);
@@ -311,7 +318,8 @@ const show_deps -> fn () int {
         io::print(" depends on:", [io::NULL_FORMAT_ARG]);
         loop [j: int = 0](j < g_dep_counts[i]) : (j = j + 1) {
             let deps: **byte = g_dependencies[i];
-            io::print("\n    - %s", [io::str_arg(deps[j])]);
+            io::print("\n    - %s%s%s", [io::str_arg(term::BRIGHT_RED), io::str_arg(deps[j]),
+                                         io::str_arg(term::RESET)]);
         }
     }
     
@@ -321,7 +329,7 @@ const show_deps -> fn () int {
 
 pub const main -> fn (argc: int, argv: **byte) int {
     io::print("\n========================================\n", [io::NULL_FORMAT_ARG]);
-    io::print("         Luma Build System v1.7         \n", [io::NULL_FORMAT_ARG]);
+    io::print("         Luma Build System v1.9         \n", [io::NULL_FORMAT_ARG]);
     io::print("========================================\n", [io::NULL_FORMAT_ARG]);
     
     let cmd: *byte = argv[1];
@@ -353,11 +361,31 @@ pub const main -> fn (argc: int, argv: **byte) int {
             return 1;
         }
 
+        let optimize: *byte = "";
+        let level: int = 0;
+        if (argv[3] != cast<*byte>(0)) {
+            optimize = argv[3];
+            let len_argv3: int = string::strlen(optimize);
+
+            loop [i: int = 0](i < len_argv3) : (++i) {
+                if (optimize[i] == '-' && optimize[i + 1] == 'O') {
+                    let buf: *byte = cast<*byte>(alloc(2));
+                    defer { free(buf); }
+                    i = i+2;
+
+                    buf[0] = optimize[i];
+                    buf[1] = '\0';
+                    
+                    level = string::atio(buf);
+                }
+            }
+        }
+
         let config: BuildConfig = BuildConfig {
             entry_point: entry_point,
             output_name: argv[2],
             stdlib_path: "std",
-            optimize: 0,
+            optimize: level,
             debug_symbols: 1,
             verbose: 1
         };
