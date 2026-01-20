@@ -191,22 +191,24 @@ const parse_expr -> fn (p: *Parser, bp: int) void {
   }
 }
 
+const parse_stmt -> fn (p: *Parser) void {
+  switch (peek(p)) {
+    _ -> {
+      parse_expr(p, 0);
+      let tok: Token = peek(p);
+      if (tok.kind == sym::TokenKind::Semi) {
+        emit_simple(p, sym::Opcode::OP_POP);
+        advance(p);
+      } elif (tok.kind != sym::TokenKind::EOF) {
+        io::print_err("Error: Expected ';' or EOF\n", [0]);
+      } 
+    }
+  }
+}
+
 pub const parse -> fn (p: *Parser) void {
   g_instr = vec::create_vector(sizeof<Instruction>);
-  
-  loop (at_end(p) == 0) {
-    parse_expr(p, 0);
-    
-    let tok: Token = peek(p);
-    if (tok.kind == sym::TokenKind::Semi) {
-      emit_simple(p, sym::Opcode::OP_POP);
-      advance(p);
-    } elif (tok.kind != sym::TokenKind::EOF) {
-      io::print_err("Error: Expected ';' or EOF\n", [0]);
-      break;
-    } 
-  }
-
+  loop (at_end(p) == 0) { parse_stmt(p); }
   emit_simple(p, sym::Opcode::OP_HALT);
 }
 

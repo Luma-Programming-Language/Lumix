@@ -319,28 +319,23 @@ const show_deps -> fn () int {
     return 0;
 }
 
-pub const main -> fn () int {
+pub const main -> fn (argc: int, argv: **byte) int {
     io::print("\n========================================\n", [io::NULL_FORMAT_ARG]);
-    io::print("         Luma Build System v1.6         \n", [io::NULL_FORMAT_ARG]);
+    io::print("         Luma Build System v1.7         \n", [io::NULL_FORMAT_ARG]);
     io::print("========================================\n", [io::NULL_FORMAT_ARG]);
     
-    let cmd_buffer: [byte; 64];
-    ui::get_user_input("\nCommand (build/script/clean/deps): ", "", 
-                   cast<*byte>(&cmd_buffer), 64);
-    let cmd: *byte = cast<*byte>(&cmd_buffer);
+    let cmd: *byte = argv[1];
+    if (cmd == cast<*byte>(0)) cmd = "unknown";
     
     if (string::strcmp(cmd, "build") == 0) {
         let output_buffer: [byte; 256];
         
-        // Try to auto-detect entry point
         io::print("\nScanning for entry point...\n", [io::NULL_FORMAT_ARG]);
         let auto_entry: *byte = find_entry_point(".");
         let entry_point: *byte;
         
-        if (auto_entry != cast<*byte>(0)) {
-            // Found automatically
-            entry_point = auto_entry;
-        } else {
+        if (auto_entry != cast<*byte>(0)) entry_point = auto_entry;
+        else {
             // Manual input required
             io::print("No entry point auto-detected.\n", [io::NULL_FORMAT_ARG]);
             let entry_buffer: [byte; 256];
@@ -351,17 +346,16 @@ pub const main -> fn () int {
                 256
             );
         }
-
-        let output_name: *byte = ui::get_user_input(
-            "Output binary name (press Enter for 'main'): ",
-            "main",
-            cast<*byte>(&output_buffer),
-            256
-        );
         
+        let c: *byte = argv[2];
+        if (c == cast<*byte>(0)) {
+            io::print("Expected output name after build.\n", [io::NULL_FORMAT_ARG]);
+            return 1;
+        }
+
         let config: BuildConfig = BuildConfig {
             entry_point: entry_point,
-            output_name: output_name,
+            output_name: argv[2],
             stdlib_path: "std",
             optimize: 0,
             debug_symbols: 1,
@@ -370,7 +364,6 @@ pub const main -> fn () int {
         
         let result: int = build(&config);
         
-        // Clean up auto-detected entry point if allocated
         if (auto_entry != cast<*byte>(0)) {
             free(auto_entry);
         }
@@ -378,9 +371,11 @@ pub const main -> fn () int {
         return result;
         
     } elif (string::strcmp(cmd, "script") == 0) {
-        let buffer: [byte; 64];
-        ui::get_user_input("Path to build file: ", "", cast<*byte>(&buffer), 64);
-        let c: *byte = cast<*byte>(&buffer);
+        let c: *byte = argv[2];
+        if (c == cast<*byte>(0)) {
+            io::print("Expected file name after script.\n", [io::NULL_FORMAT_ARG]);
+            return 1;
+        }
 
         let token_vector: Vector = vec::create_vector(sizeof<Token>);
         let path: *byte = c;
@@ -418,10 +413,12 @@ pub const main -> fn () int {
         return show_deps();
     } else {
         io::print("\nUnknown command: %s
-        Usage:
-            build - Build the project
-            clean - Clean build artifacts
-            deps  - Show dependency tree\n", 
+ Usage:
+     clean - Clean build artifacts
+     deps  - Show dependency tree
+     
+     build <Name of output> - Build the project
+     script <build.lb>      - to use the script instead\n", 
         [io::str_arg(cmd)]);
         return 1;
     }
