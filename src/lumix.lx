@@ -43,6 +43,12 @@ let g_graph_size: int = 0;
 const find_entry_point -> fn (scan_path: *byte) *byte {
     let file_count: int = 0;
     let files: **byte = fs::scan_directory(scan_path, &file_count);
+    defer {
+        loop [i: int = 0](i < file_count) : (i = i + 1) {
+            free(files[i]);
+        }
+        free(files);
+    }
     
     if (file_count == 0) return cast<*byte>(0);
     
@@ -50,22 +56,15 @@ const find_entry_point -> fn (scan_path: *byte) *byte {
     
     loop [i: int = 0](i < file_count) : (i = i + 1) {
         if (util::contains_main_function(files[i]) == 1) {
-            // Found it! Copy the filepath
             let len: int = string::strlen(files[i]);
             entry_point = cast<*byte>(alloc((len + 1) * sizeof<byte>));
             mem::memcpy(cast<*void>(entry_point), cast<*void>(files[i]), len);
             entry_point[len] = '\0';
-            
-            io::print("Auto-detected entry point: %s\n", [io::str_arg(entry_point)]);
             break;
         }
     }
     
     // Free all the file paths
-    loop [i: int = 0](i < file_count) : (i = i + 1) {
-        free(files[i]);
-    }
-    free(files);
     
     return entry_point;
 }
@@ -79,19 +78,19 @@ const build_dep_graph -> fn (scan_path: *byte) int {
     
     let file_count: int = 0;
     let files: **byte = fs::scan_directory(scan_path, &file_count);
+
+    defer {
+        loop [i: int = g_graph_size](i < file_count) : (i = i + 1) {
+            free(files[i]);
+        }
+        free(files);
+    }
     
     if (file_count == 0) {
         io::print_err("\nError: No .lx files found in current directory\n", [0]);
         io::print_err("Make sure you're running this from a directory containing .lx files\n", [0]);
         return 0;
     }
-    
-    // Print file list BEFORE we start transferring ownership
-    io::print("Found files:\n", [io::NULL_FORMAT_ARG]);
-    loop [i: int = 0](i < file_count) : (i = i + 1) {
-        io::print("  - %s\n", [io::str_arg(files[i])]);
-    }
-    io::print("\n", [io::NULL_FORMAT_ARG]);
 
     // Process files and transfer ownership to globals
     loop [i: int = 0](i < file_count && g_graph_size < fs::MAX_FILES) : (i = i + 1) {
@@ -117,13 +116,6 @@ const build_dep_graph -> fn (scan_path: *byte) int {
         g_graph_size = g_graph_size + 1;
     }
     
-    // Free any remaining files that werent transferred
-    loop [i: int = g_graph_size](i < file_count) : (i = i + 1) {
-        free(files[i]);
-    }
-    
-    // Finally free the container
-    free(files);
     return g_graph_size;
 }
 
@@ -247,18 +239,14 @@ const build -> fn (config: *BuildConfig) int {
         return 1;
     }
     
-    if (config.verbose == 1) {
-        io::print("\nAnalyzing dependencies...\n", [io::NULL_FORMAT_ARG]);
-    }
-    
     if (build_dep_graph(".") == 0) return 1;
-
-    io::print("Compiling modules...\n", [io::NULL_FORMAT_ARG]);
 
     let cmd_str: String = build_compile_command(config);
     defer { string::free_string(&cmd_str); }
 
-    io::print("Executing command:\n%s\n\t", [io::str_arg(cmd_str.slice.ptr)]);
+    io::print("Executing command:\n%s%s%s\n\t", [io::str_arg(term::RED),
+                                                 io::str_arg(cmd_str.slice.ptr),
+                                                 io::str_arg(term::RESET)]);
 
     let compile_result: int = system(cmd_str.slice.ptr);
     if (compile_result != 0) {
@@ -328,17 +316,12 @@ const show_deps -> fn () int {
 }
 
 pub const main -> fn (argc: int, argv: **byte) int {
-    io::print("\n========================================\n", [io::NULL_FORMAT_ARG]);
-    io::print("         Luma Build System v1.9         \n", [io::NULL_FORMAT_ARG]);
-    io::print("========================================\n", [io::NULL_FORMAT_ARG]);
-    
     let cmd: *byte = argv[1];
     if (cmd == cast<*byte>(0)) cmd = "unknown";
     
     if (string::strcmp(cmd, "build") == 0) {
         let output_buffer: [byte; 256];
-        
-        io::print("\nScanning for entry point...\n", [io::NULL_FORMAT_ARG]);
+
         let auto_entry: *byte = find_entry_point(".");
         let entry_point: *byte;
         
@@ -439,14 +422,17 @@ pub const main -> fn (argc: int, argv: **byte) int {
         
     } elif (string::strcmp(cmd, "deps") == 0) {
         return show_deps();
+    } elif (string::strcmp(cmd, "version") == 0){
+        io::print("Luma Build System v1.9", [io::NULL_FORMAT_ARG]);
     } else {
         io::print("\nUnknown command: %s
- Usage:
-     clean - Clean build artifacts
-     deps  - Show dependency tree
-     
-     build <Name of output> - Build the project
-     script <build.lb>      - to use the script instead\n", 
+Usage:
+    clean   - Clean build artifacts
+    deps    - Show dependency tree
+    version - Show the current version of lumix
+    
+    build <Name of output> - Build the project
+    script <build.lb>      - to use the script instead\n", 
         [io::str_arg(cmd)]);
         return 1;
     }

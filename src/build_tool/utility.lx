@@ -54,30 +54,29 @@ pub const copy_string -> fn (src: *byte, start: int, len: int) *byte {
     return dest;
 }
 
-// New function to check if a file contains the main function
 pub const contains_main_function -> fn (filepath: *byte) int {
     let content: *byte = io::read_file(filepath);
     if (content == cast<*byte>(0)) return 0;
-    
+
     defer { free(content); }
-    
+
     let len: int = string::strlen(content);
-    let pattern: *byte = "pub const main -> fn ()";
+    let pattern: *byte = "pub const main -> fn";
     let pattern_len: int = string::strlen(pattern);
-    
+
     let i: int = 0;
     loop (i < len - pattern_len) {
         let matches: int = 1;
-        loop [j: int = 0](j < pattern_len) : (j = j + 1) {
+        loop [j: int = 0](j < pattern_len) : (++j) {
             if (content[i + j] != pattern[j]) {
                 matches = 0;
                 break;
             }
         }
-        
+
         if (matches == 1) return 1;
-        i = i + 1;
+        ++i;
     }
-    
+
     return 0;
 }
