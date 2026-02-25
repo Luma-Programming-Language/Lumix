@@ -14,13 +14,19 @@
 @use "getch" as gc
 @use "toml" as toml
 
+const MAX_CMD_LEN: int = 512;
+
 const BuildConfig -> struct {
-    entry_point: *byte,
-    output_name: *byte,
-    stdlib_path: *byte,
-    optimize: int,
+    entry_point:   *byte,
+    output_name:   *byte,
+    stdlib_path:   *byte,
+    scan_path:     *byte,
+    binary_dir:    *byte,
+    run_args:      *byte,
+    build_flags:   *byte,
+    optimize:      int,
     debug_symbols: int,
-    verbose: int
+    verbose:       int
 };
 
 const NULL_BYTE: Slice = Slice { ptr: "", len: 0 };
@@ -44,11 +50,11 @@ const find_entry_point -> fn (scan_path: *byte) *byte {
         }
         free(files);
     }
-    
+
     if (file_count == 0) return cast<*byte>(0);
-    
+
     let entry_point: *byte = cast<*byte>(0);
-    
+
     loop [i: int = 0](i < file_count) : (i = i + 1) {
         if (util::contains_main_function(files[i]) == 1) {
             let len: int = string::strlen(files[i]);
@@ -58,17 +64,17 @@ const find_entry_point -> fn (scan_path: *byte) *byte {
             break;
         }
     }
-    
+
     return entry_point;
 }
 
 #takes_ownership
 const build_dep_graph -> fn (scan_path: *byte) int {
     g_graph_size = 0;
-    
+
     let cwd: *byte = fs::get_cwd();
     free(cwd);
-    
+
     let file_count: int = 0;
     let files: **byte = fs::scan_directory(scan_path, &file_count);
 
@@ -78,35 +84,35 @@ const build_dep_graph -> fn (scan_path: *byte) int {
         }
         free(files);
     }
-    
+
     if (file_count == 0) {
-        io::print_err("\nError: No .lx files found in current directory\n", [0]);
+        io::print_err("\nError: No .lx files found in directory '%s'\n", [cast<int>(scan_path)]);
         io::print_err("Make sure you're running this from a directory containing .lx files\n", [0]);
         return 0;
     }
 
     loop [i: int = 0](i < file_count && g_graph_size < fs::MAX_FILES) : (i = i + 1) {
         let filepath: *byte = files[i];
-        
+
         if (module::extract_module_name(filepath) == cast<*byte>(0)) {
-            io::print("Warning: Could not extract module name from %s\n", 
+            io::print("Warning: Could not extract module name from %s\n",
                         [io::str_arg(filepath)]);
             free(filepath);
             continue;
         }
-        
+
         let dep_count: int = 0;
-        
+
         g_file_paths[g_graph_size] = filepath;
         g_module_names[g_graph_size] = module::extract_module_name(filepath);
         g_dependencies[g_graph_size] = parser::find_imports(filepath, &dep_count);
         g_dep_counts[g_graph_size] = dep_count;
         g_visited[g_graph_size] = 0;
         g_in_stack[g_graph_size] = 0;
-        
+
         g_graph_size = g_graph_size + 1;
     }
-    
+
     return g_graph_size;
 }
 
@@ -121,37 +127,37 @@ const has_dep -> fn (slice_ptr: *Slice, slice_count: int, dep_path: *byte) int {
 const convert_std_module_path -> fn (dep_name: *byte) *byte {
     let dep_len: int = string::strlen(dep_name);
     let total_len: int = STD_PREFIX_LEN + (dep_len - STD_PREFIX_LEN) + module::FILE_EXT_LEN + 1;
-    
+
     let dep_path: *byte = cast<*byte>(alloc(total_len * sizeof<byte>));
-    
+
     dep_path[0] = 's';
     dep_path[1] = 't';
     dep_path[2] = 'd';
     dep_path[3] = '/';
-    
-    mem::memcpy(cast<*void>(&dep_path[STD_PREFIX_LEN]), 
-                cast<*void>(&dep_name[STD_PREFIX_LEN]), 
+
+    mem::memcpy(cast<*void>(&dep_path[STD_PREFIX_LEN]),
+                cast<*void>(&dep_name[STD_PREFIX_LEN]),
                 dep_len - STD_PREFIX_LEN);
-    
+
     let base_len: int = STD_PREFIX_LEN + (dep_len - STD_PREFIX_LEN);
     dep_path[base_len + 0] = '.';
     dep_path[base_len + 1] = 'l';
     dep_path[base_len + 2] = 'x';
     dep_path[base_len + 3] = '\0';
-    
+
     return dep_path;
 }
 
 const add_dependencies_to_cmd -> fn (slice: *Slice, slice_count: *int, config: *BuildConfig) void {
     let allocated_std_paths: [*byte; 50];
     let allocated_count: int = 0;
-    
+
     loop [i: int = 0](i < g_graph_size) : (i = i + 1) {
         loop [j: int = 0](j < g_dep_counts[i]) : (j = j + 1) {
             let dep_name: **byte = g_dependencies[i];
             let dep_path: *byte;
             let needs_free: int = 0;
-            
+
             if (string::strncmp(dep_name[j], "std_", STD_PREFIX_LEN) == 0) {
                 dep_path = convert_std_module_path(dep_name[j]);
                 needs_free = 1;
@@ -166,13 +172,13 @@ const add_dependencies_to_cmd -> fn (slice: *Slice, slice_count: *int, config: *
                 slice[*slice_count] = slice.null_terminated_slice(" ");
                 *slice_count = *slice_count + 1;
             }
-            
+
             if (needs_free == 1 && allocated_count < 50) {
                 allocated_std_paths[allocated_count] = dep_path;
                 allocated_count = allocated_count + 1;
             }
         }
-        
+
         if (string::strcmp(g_file_paths[i], config.entry_point) == 0) continue;
 
         slice[*slice_count] = slice.null_terminated_slice(g_file_paths[i]);
@@ -185,24 +191,48 @@ const add_dependencies_to_cmd -> fn (slice: *Slice, slice_count: *int, config: *
 const build_compile_command -> fn (config: *BuildConfig) String {
     let slice: *Slice = cast<*Slice>(alloc(200 * sizeof<Slice>));
     defer { free(slice); }
-    
+
     let slice_count: int = 0;
-    
+
     slice[slice_count++] = slice.null_terminated_slice("luma ");
     slice[slice_count++] = slice.null_terminated_slice(config.entry_point);
     slice[slice_count++] = slice.null_terminated_slice(" ");
     slice[slice_count++] = slice.null_terminated_slice("-l ");
-    
+
     add_dependencies_to_cmd(slice, &slice_count, config);
-    
+
+    // build output path: binary_dir/name or just name
+    let full_output: *byte;
+    let needs_free_output: int = 0;
+
+    if (config.binary_dir != cast<*byte>(0)) {
+        let dir_len:  int = string::strlen(config.binary_dir);
+        let name_len: int = string::strlen(config.output_name);
+        full_output = cast<*byte>(alloc((dir_len + 1 + name_len + 1) * sizeof<byte>));
+        mem::memcpy(cast<*void>(full_output), cast<*void>(config.binary_dir), dir_len);
+        full_output[dir_len] = '/';
+        mem::memcpy(cast<*void>(&full_output[dir_len + 1]), cast<*void>(config.output_name), name_len);
+        full_output[dir_len + 1 + name_len] = '\0';
+        needs_free_output = 1;
+    } else {
+        full_output = config.output_name;
+    }
+
+    if (config.build_flags != cast<*byte>(0)) {
+        slice[slice_count++] = slice.null_terminated_slice(config.build_flags);
+        slice[slice_count++] = slice.null_terminated_slice(" ");
+    }
+
     slice[slice_count++] = slice.null_terminated_slice("-name ");
-    slice[slice_count++] = slice.null_terminated_slice(config.output_name);
+    slice[slice_count++] = slice.null_terminated_slice(full_output);
     slice[slice_count++] = slice.null_terminated_slice(" -O");
     slice[slice_count++] = slice.null_terminated_slice(string::from_int(config.optimize));
     slice[slice_count] = NULL_BYTE;
 
     let cmd_str: String;
     cmd_str = cmd_str.concat_strs(slice, slice_count);
+
+    if (needs_free_output == 1) free(full_output);
     return cmd_str;
 }
 
@@ -210,14 +240,14 @@ const build -> fn (config: *BuildConfig) int {
     io::print("\n=== Building Luma Project ===\n", [io::NULL_FORMAT_ARG]);
     io::print("Entry point: %s\n", [io::str_arg(config.entry_point)]);
     io::print("Output name: %s\n", [io::str_arg(config.output_name)]);
-    
+
     if (util::file_exists(config.entry_point) == 0) {
-        io::print_err("\nError: Entry point file '%s' does not exist\n", 
+        io::print_err("\nError: Entry point file '%s' does not exist\n",
                      [cast<int>(config.entry_point)]);
         return 1;
     }
-    
-    if (build_dep_graph(".") == 0) return 1;
+
+    if (build_dep_graph(config.scan_path) == 0) return 1;
 
     let cmd_str: String = build_compile_command(config);
     defer { string::free_string(&cmd_str); }
@@ -232,7 +262,7 @@ const build -> fn (config: *BuildConfig) int {
         return compile_result;
     }
 
-    io::print("\nBuild completed successfully. Output: %s\n\n", 
+    io::print("\nBuild completed successfully. Output: %s\n\n",
              [io::str_arg(config.output_name)]);
 
     loop [i: int = 0](i < g_graph_size) : (i = i + 1) {
@@ -250,7 +280,7 @@ const build -> fn (config: *BuildConfig) int {
 
 const clean -> fn () int {
     io::print("\n=== Cleaning Build Artifacts ===\n", [io::NULL_FORMAT_ARG]);
-    
+
     let confirm: int = gc::get_yes_no("Are you sure you want to clean build artifacts?");
     if (confirm == 0) {
         io::print("Clean operation cancelled.\n\n", [io::NULL_FORMAT_ARG]);
@@ -265,18 +295,18 @@ const clean -> fn () int {
 
 const show_deps -> fn () int {
     io::print("\n=== Dependency Tree ===\n", [io::NULL_FORMAT_ARG]);
-    
+
     if (build_dep_graph(".") == 0) return 1;
-    
+
     io::print("\nModule dependencies:\n", [io::NULL_FORMAT_ARG]);
-    
+
     loop [i: int = 0](i < g_graph_size) : (++i) {
-        io::print("\n  %s(%s)%s", [io::str_arg(term::CYAN), io::str_arg(g_module_names[i]), 
+        io::print("\n  %s(%s)%s", [io::str_arg(term::CYAN), io::str_arg(g_module_names[i]),
                                    io::str_arg(term::RESET)]);
 
         if (g_dep_counts[i] == 0) {
             io::print(" (no dependencies)", [io::NULL_FORMAT_ARG]);
-            continue; 
+            continue;
         }
 
         io::print(" depends on:", [io::NULL_FORMAT_ARG]);
@@ -286,7 +316,7 @@ const show_deps -> fn () int {
                                          io::str_arg(term::RESET)]);
         }
     }
-    
+
     io::print("\n", [io::NULL_FORMAT_ARG]);
     return 0;
 }
@@ -294,7 +324,7 @@ const show_deps -> fn () int {
 pub const main -> fn (argc: int, argv: **byte) int {
     let cmd: *byte = argv[1];
     if (cmd == cast<*byte>(0)) cmd = "unknown";
-    
+
     if (string::strcmp(cmd, "build") == 0) {
         // --- Load lumix.toml if present ---
         let tcfg: TomlConfig = toml::parse_toml();
@@ -311,7 +341,7 @@ pub const main -> fn (argc: int, argv: **byte) int {
 
         if (tcfg.entry != cast<*byte>(0)) {
             entry_point = tcfg.entry;
-            tcfg.entry = cast<*byte>(0); // transfer ownership so defer doesn't double-free
+            tcfg.entry = cast<*byte>(0);
         } else {
             auto_entry = find_entry_point(".");
             if (auto_entry != cast<*byte>(0)) {
@@ -336,7 +366,7 @@ pub const main -> fn (argc: int, argv: **byte) int {
             output_name = argv[2];
         } elif (tcfg.name != cast<*byte>(0)) {
             output_name = tcfg.name;
-            tcfg.name = cast<*byte>(0); // transfer ownership
+            tcfg.name = cast<*byte>(0);
         } else {
             io::print("No output name provided. Supply one after 'build' or set 'name' in lumix.toml.\n",
                       [io::NULL_FORMAT_ARG]);
@@ -364,19 +394,56 @@ pub const main -> fn (argc: int, argv: **byte) int {
             }
         }
 
+        // --- Resolve debug symbols ---
+        // Priority: toml debug > default on
+        let dbg: int = 1;
+        if (tcfg.debug >= 0) dbg = tcfg.debug;
+
+        // --- Resolve scan directory ---
+        // Priority: toml directory > "."
+        let scan_dir: *byte = ".";
+        if (tcfg.directory != cast<*byte>(0)) {
+            scan_dir = tcfg.directory;
+            tcfg.directory = cast<*byte>(0);
+        }
+
+        // --- Resolve binary_dir ---
+        let binary_dir: *byte = cast<*byte>(0);
+        if (tcfg.binary_dir != cast<*byte>(0)) {
+            binary_dir = tcfg.binary_dir;
+            tcfg.binary_dir = cast<*byte>(0);
+        }
+
+        // --- Resolve run_args ---
+        let run_args: *byte = cast<*byte>(0);
+        if (tcfg.run_args != cast<*byte>(0)) {
+            run_args = tcfg.run_args;
+            tcfg.run_args = cast<*byte>(0);
+        }
+
+        // --- Resolve build flags ---
+        let build_flags: *byte = cast<*byte>(0);
+        if (tcfg.build_flags != cast<*byte>(0)) {
+            build_flags = tcfg.build_flags;
+            tcfg.build_flags = cast<*byte>(0);
+        }
+
         let config: BuildConfig = BuildConfig {
-            entry_point: entry_point,
-            output_name: output_name,
-            stdlib_path: "std",
-            optimize: level,
-            debug_symbols: 1,
-            verbose: 1
+            entry_point:   entry_point,
+            output_name:   output_name,
+            stdlib_path:   "std",
+            scan_path:     scan_dir,
+            binary_dir:    binary_dir,
+            run_args:      run_args,
+            build_flags:   build_flags,
+            optimize:      level,
+            debug_symbols: dbg,
+            verbose:       1
         };
 
         let result: int = build(&config);
         if (auto_entry != cast<*byte>(0)) free(auto_entry);
         return result;
-
     } elif (string::strcmp(cmd, "clean") == 0) {
         return clean();
     } elif (string::strcmp(cmd, "deps") == 0) {
@@ -390,10 +457,10 @@ Usage:
     deps    - Show dependency tree
     version - Show the current version of lumix
 
-    build <output> - Build the project\n", 
+    build <output> - Build the project\n",
         [io::str_arg(cmd)]);
         return 1;
     }
-    
+
     return 0;
 }

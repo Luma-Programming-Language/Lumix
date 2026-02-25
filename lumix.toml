@@ -3,3 +3,9 @@ name      = "lumix"
 directory = "src"
 entry     = "src/lumix.lx"
 optimize  = 3
+
+[build]
+flags = ""
+
+[output]
+binary_dir = "bin"
