@@ -1,23 +1,18 @@
-/// luma src/lumix.lx -l std/string.lx std/memory.lx std/io.lx src/file_system.lx src/getch.lx std/sys.lx src/module.lx src/parser.lx src/user_input.lx src/utility.lx -name lumix
 @module "build"
 
 @use "std_string" as string
 @use "std_termfx" as term
-@use "user_input" as ui
-@use "module" as module
 @use "std_memory" as mem
-@use "file_system" as fs
-@use "parse" as parser
-@use "utility" as util
 @use "std_sys" as sys
 @use "std_io" as io
-@use "getch" as gc
 
-@use "std_vector" as vec
-@use "symbols" as sym
-@use "lexer" as lexer
-@use "parser" as p
-@use "vm" as vm
+@use "file_system" as fs
+@use "parser" as parser
+@use "user_input" as ui
+@use "module" as module
+@use "utility" as util
+@use "toml" as toml
+@use "getch" as gc
 
 const BuildConfig -> struct {
     entry_point: *byte,
@@ -320,45 +315,69 @@ pub const main -> fn (argc: int, argv: **byte) int {
     if (cmd == cast<*byte>(0)) cmd = "unknown";
     
     if (string::strcmp(cmd, "build") == 0) {
-        let output_buffer: [byte; 256];
+        // --- Load lumix.toml if present ---
+        let tcfg: TomlConfig = toml::parse_toml();
+        defer { toml::free_toml_config(&tcfg); }
 
-        let auto_entry: *byte = find_entry_point(".");
-        let entry_point: *byte;
-        
-        if (auto_entry != cast<*byte>(0)) entry_point = auto_entry;
-        else {
-            // Manual input required
-            io::print("No entry point auto-detected.\n", [io::NULL_FORMAT_ARG]);
-            let entry_buffer: [byte; 256];
-            entry_point = ui::get_user_input(
-                "Entry point file (press Enter for 'main.lx'): ",
-                "main.lx",
-                cast<*byte>(&entry_buffer),
-                256
-            );
+        if (tcfg.found == 1) {
+            io::print("lumix.toml found — using config file.\n", [io::NULL_FORMAT_ARG]);
         }
-        
-        let c: *byte = argv[2];
-        if (c == cast<*byte>(0)) {
-            io::print("Expected output name after build.\n", [io::NULL_FORMAT_ARG]);
+
+        // --- Resolve entry point ---
+        // Priority: toml entry > auto-detect > manual prompt
+        let auto_entry: *byte = cast<*byte>(0);
+        let entry_point: *byte;
+
+        if (tcfg.entry != cast<*byte>(0)) {
+            entry_point = tcfg.entry;
+            tcfg.entry = cast<*byte>(0); // transfer ownership so defer doesn't double-free
+        } else {
+            auto_entry = find_entry_point(".");
+            if (auto_entry != cast<*byte>(0)) {
+                entry_point = auto_entry;
+            } else {
+                io::print("No entry point auto-detected.\n", [io::NULL_FORMAT_ARG]);
+                let entry_buffer: [byte; 256];
+                entry_point = ui::get_user_input(
+                    "Entry point file (press Enter for 'main.lx'): ",
+                    "main.lx",
+                    cast<*byte>(&entry_buffer),
+                    256
+                );
+                auto_entry = cast<*byte>(0); // stack buffer, don't free
+            }
+        }
+
+        // --- Resolve output name ---
+        // Priority: argv[2] > toml name > error
+        let output_name: *byte;
+        if (argv[2] != cast<*byte>(0)) {
+            output_name = argv[2];
+        } elif (tcfg.name != cast<*byte>(0)) {
+            output_name = tcfg.name;
+            tcfg.name = cast<*byte>(0); // transfer ownership
+        } else {
+            io::print("No output name provided. Supply one after 'build' or set 'name' in lumix.toml.\n",
+                      [io::NULL_FORMAT_ARG]);
+            if (auto_entry != cast<*byte>(0)) free(auto_entry);
             return 1;
         }
 
-        let optimize: *byte = "";
+        // --- Resolve optimisation level ---
+        // Priority: argv[3] -O flag > toml optimize > 0
         let level: int = 0;
-        if (argv[3] != cast<*byte>(0)) {
-            optimize = argv[3];
-            let len_argv3: int = string::strlen(optimize);
+        if (tcfg.optimize >= 0) level = tcfg.optimize;
 
+        if (argv[3] != cast<*byte>(0)) {
+            let optimize: *byte = argv[3];
+            let len_argv3: int = string::strlen(optimize);
             loop [i: int = 0](i < len_argv3) : (++i) {
                 if (optimize[i] == '-' && optimize[i + 1] == 'O') {
                     let buf: *byte = cast<*byte>(alloc(2));
                     defer { free(buf); }
-                    i = i+2;
-
+                    i = i + 2;
                     buf[0] = optimize[i];
                     buf[1] = '\0';
-                    
                     level = string::atio(buf);
                 }
             }
@@ -366,57 +385,19 @@ pub const main -> fn (argc: int, argv: **byte) int {
 
         let config: BuildConfig = BuildConfig {
             entry_point: entry_point,
-            output_name: argv[2],
+            output_name: output_name,
             stdlib_path: "std",
             optimize: level,
             debug_symbols: 1,
             verbose: 1
         };
-        
+
         let result: int = build(&config);
-        
-        if (auto_entry != cast<*byte>(0)) {
-            free(auto_entry);
-        }
-        
+
+        if (auto_entry != cast<*byte>(0)) free(auto_entry);
+
         return result;
         
-    } elif (string::strcmp(cmd, "script") == 0) {
-        let c: *byte = argv[2];
-        if (c == cast<*byte>(0)) {
-            io::print("Expected file name after script.\n", [io::NULL_FORMAT_ARG]);
-            return 1;
-        }
-
-        let token_vector: Vector = vec::create_vector(sizeof<Token>);
-        let path: *byte = c;
-        let file: *byte = io::read_file(path);
-        defer { 
-            vec::free_vector(&token_vector);
-            free(file); 
-        }
-
-        let lx: Lexer = lexer::create_lexer(file);
-        loop {
-            let tok: Token = lexer::next_token(&lx);
-            if (tok.kind == sym::TokenKind::EOF) break;
-            token_vector.push_back(cast<*void>(&tok));
-        }
-
-        let tokens: *Token = cast<*Token>(token_vector.data);
-        let psr: Parser = p::create_parser(tokens, token_vector.size);
-        defer { p::free_parser(&psr); }
-
-        p::parse(&psr);
-
-        // Create VM and assemble the bytecode
-        let virtual_machine: VM = vm::create_vm();
-        defer { vm::free_vm(&virtual_machine); }
-
-        p::assemble(&psr, &virtual_machine);
-
-        // Execute!
-        vm::vm_execute(&virtual_machine);
     } elif (string::strcmp(cmd, "clean") == 0) {
         return clean();
         
@@ -430,12 +411,12 @@ Usage:
     clean   - Clean build artifacts
     deps    - Show dependency tree
     version - Show the current version of lumix
-    
-    build <Name of output> - Build the project
-    script <build.lb>      - to use the script instead\n", 
+
+    build <output> - Build the project\n", 
         [io::str_arg(cmd)]);
         return 1;
     }
     
     return 0;
 }
+

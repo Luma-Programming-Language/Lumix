@@ -1,0 +1,192 @@
+@module "toml"
+
+@use "std_string" as string
+@use "std_memory" as mem
+@use "std_io" as io
+
+/// Represents a parsed lumix.toml config.
+/// Fields left as null ptr (0) mean "not set" — caller should apply defaults.
+pub const TomlConfig -> struct {
+    name:     *byte,   // [project] name
+    entry:    *byte,   // [project] entry
+    optimize: int,     // [project] optimize  (default -1 = not set)
+    found:    int      // 1 if lumix.toml was found and parsed, 0 otherwise
+};
+
+const TOML_FILE: *byte = "lumix.toml";
+
+/// Skip whitespace (spaces and tabs) in-place, returns new index.
+const skip_ws -> fn (src: *byte, i: int) int {
+    loop (src[i] == ' ' || src[i] == '\t') {
+        i = i + 1;
+    }
+    return i;
+}
+
+/// Skip to the next newline (or null terminator).
+const skip_line -> fn (src: *byte, i: int) int {
+    loop (src[i] != '\n' && src[i] != '\0') {
+        i = i + 1;
+    }
+    if (src[i] == '\n') i = i + 1;
+    return i;
+}
+
+/// Read a bare key (alphanumeric + underscore + hyphen) into dest.
+/// Returns the index after the key.
+const read_key -> fn (src: *byte, i: int, dest: *byte, max: int) int {
+    let n: int = 0;
+    loop (n < max - 1) {
+        let c: byte = src[i];
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+            (c >= '0' && c <= '9') || c == '_' || c == '-') {
+            dest[n] = c;
+            n = n + 1;
+            i = i + 1;
+        } else {
+            break;
+        }
+    }
+    dest[n] = '\0';
+    return i;
+}
+
+/// Read a quoted string value (after the opening `"`).
+/// Returns index after the closing `"`.
+/// dest is allocated by caller with enough space.
+const read_quoted -> fn (src: *byte, i: int, dest: *byte, max: int) int {
+    let n: int = 0;
+    loop (src[i] != '"' && src[i] != '\0' && n < max - 1) {
+        dest[n] = src[i];
+        n = n + 1;
+        i = i + 1;
+    }
+    dest[n] = '\0';
+    if (src[i] == '"') i = i + 1; // consume closing quote
+    return i;
+}
+
+/// Read an integer value from src at position i.
+/// Returns the parsed integer via out_val, and new index.
+const read_int -> fn (src: *byte, i: int, out_val: *int) int {
+    let buf: [byte; 32];
+    let n: int = 0;
+    loop (src[i] >= '0' && src[i] <= '9' && n < 31) {
+        buf[n] = src[i];
+        n = n + 1;
+        i = i + 1;
+    }
+    buf[n] = '\0';
+    *out_val = string::atio(cast<*byte>(&buf));
+    return i;
+}
+
+/// Duplicate a stack buffer into heap memory (returns owned *byte).
+#returns_ownership
+const heap_dup -> fn (src: *byte) *byte {
+    let len: int = string::strlen(src);
+    let out: *byte = cast<*byte>(alloc((len + 1) * sizeof<byte>));
+    mem::memcpy(cast<*void>(out), cast<*void>(src), len);
+    out[len] = '\0';
+    return out;
+}
+
+/// Parse lumix.toml in the current directory.
+/// Returns a TomlConfig; caller is responsible for freeing name and entry
+/// if they are non-null.
+#returns_ownership
+pub const parse_toml -> fn () TomlConfig {
+    let cfg: TomlConfig = TomlConfig {
+        name:     cast<*byte>(0),
+        entry:    cast<*byte>(0),
+        optimize: -1,
+        found:    0
+    };
+
+    let src: *byte = io::read_file(TOML_FILE);
+    if (src == cast<*byte>(0)) return cfg;
+
+    defer { free(src); }
+
+    cfg.found = 1;
+
+    let i: int = 0;
+    let in_project: int = 0;
+
+    let key_buf:  [byte; 64];
+    let val_buf:  [byte; 256];
+
+    loop (src[i] != '\0') {
+        i = skip_ws(src, i);
+
+        // Blank line
+        if (src[i] == '\n') {
+            i = i + 1;
+            continue;
+        }
+
+        // Comment
+        if (src[i] == '#') {
+            i = skip_line(src, i);
+            continue;
+        }
+
+        // Section header  [name]
+        if (src[i] == '[') {
+            i = i + 1; // consume '['
+            i = skip_ws(src, i);
+            i = read_key(src, i, cast<*byte>(&key_buf), 64);
+            i = skip_ws(src, i);
+            if (src[i] == ']') i = i + 1;
+
+            in_project = string::strcmp(cast<*byte>(&key_buf), "project");
+            // strcmp returns 0 on match, so flip
+            if (in_project == 0) in_project = 1; else in_project = 0;
+
+            i = skip_line(src, i);
+            continue;
+        }
+
+        // Key = value  (only care about [project] section)
+        i = read_key(src, i, cast<*byte>(&key_buf), 64);
+        i = skip_ws(src, i);
+
+        if (src[i] != '=') {
+            i = skip_line(src, i);
+            continue;
+        }
+        i = i + 1; // consume '='
+        i = skip_ws(src, i);
+
+        if (in_project == 1) {
+            if (string::strcmp(cast<*byte>(&key_buf), "name") == 0) {
+                if (src[i] == '"') {
+                    i = i + 1;
+                    i = read_quoted(src, i, cast<*byte>(&val_buf), 256);
+                    cfg.name = heap_dup(cast<*byte>(&val_buf));
+                }
+            } elif (string::strcmp(cast<*byte>(&key_buf), "entry") == 0) {
+                if (src[i] == '"') {
+                    i = i + 1;
+                    i = read_quoted(src, i, cast<*byte>(&val_buf), 256);
+                    cfg.entry = heap_dup(cast<*byte>(&val_buf));
+                }
+            } elif (string::strcmp(cast<*byte>(&key_buf), "optimize") == 0) {
+                let level: int = 0;
+                i = read_int(src, i, &level);
+                cfg.optimize = level;
+            }
+        }
+
+        i = skip_line(src, i);
+    }
+
+    return cfg;
+}
+
+/// Free heap-allocated fields inside a TomlConfig.
+pub const free_toml_config -> fn (cfg: *TomlConfig) void {
+    if (cfg.name  != cast<*byte>(0)) { free(cfg.name);  cfg.name  = cast<*byte>(0); }
+    if (cfg.entry != cast<*byte>(0)) { free(cfg.entry); cfg.entry = cast<*byte>(0); }
+}
+
