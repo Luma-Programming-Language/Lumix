@@ -7,12 +7,12 @@
 @use "std_io" as io
 
 @use "file_system" as fs
-@use "parser" as parser
+@use "parse" as parser
 @use "user_input" as ui
 @use "module" as module
 @use "utility" as util
-@use "toml" as toml
 @use "getch" as gc
+@use "toml" as toml
 
 const BuildConfig -> struct {
     entry_point: *byte,
@@ -59,8 +59,6 @@ const find_entry_point -> fn (scan_path: *byte) *byte {
         }
     }
     
-    // Free all the file paths
-    
     return entry_point;
 }
 
@@ -69,7 +67,7 @@ const build_dep_graph -> fn (scan_path: *byte) int {
     g_graph_size = 0;
     
     let cwd: *byte = fs::get_cwd();
-    free(cwd);  // Use immediately then free
+    free(cwd);
     
     let file_count: int = 0;
     let files: **byte = fs::scan_directory(scan_path, &file_count);
@@ -87,7 +85,6 @@ const build_dep_graph -> fn (scan_path: *byte) int {
         return 0;
     }
 
-    // Process files and transfer ownership to globals
     loop [i: int = 0](i < file_count && g_graph_size < fs::MAX_FILES) : (i = i + 1) {
         let filepath: *byte = files[i];
         
@@ -100,7 +97,6 @@ const build_dep_graph -> fn (scan_path: *byte) int {
         
         let dep_count: int = 0;
         
-        // Transfer ownership to globals
         g_file_paths[g_graph_size] = filepath;
         g_module_names[g_graph_size] = module::extract_module_name(filepath);
         g_dependencies[g_graph_size] = parser::find_imports(filepath, &dep_count);
@@ -128,25 +124,22 @@ const convert_std_module_path -> fn (dep_name: *byte) *byte {
     
     let dep_path: *byte = cast<*byte>(alloc(total_len * sizeof<byte>));
     
-    // Copy "std/"
     dep_path[0] = 's';
     dep_path[1] = 't';
     dep_path[2] = 'd';
     dep_path[3] = '/';
     
-    // Copy name after "std_"
     mem::memcpy(cast<*void>(&dep_path[STD_PREFIX_LEN]), 
                 cast<*void>(&dep_name[STD_PREFIX_LEN]), 
                 dep_len - STD_PREFIX_LEN);
     
-    // Append ".lx"
     let base_len: int = STD_PREFIX_LEN + (dep_len - STD_PREFIX_LEN);
     dep_path[base_len + 0] = '.';
     dep_path[base_len + 1] = 'l';
     dep_path[base_len + 2] = 'x';
     dep_path[base_len + 3] = '\0';
     
-    return dep_path;  // Caller now owns this memory
+    return dep_path;
 }
 
 const add_dependencies_to_cmd -> fn (slice: *Slice, slice_count: *int, config: *BuildConfig) void {
@@ -161,7 +154,7 @@ const add_dependencies_to_cmd -> fn (slice: *Slice, slice_count: *int, config: *
             
             if (string::strncmp(dep_name[j], "std_", STD_PREFIX_LEN) == 0) {
                 dep_path = convert_std_module_path(dep_name[j]);
-                needs_free = 1;  // We allocated this, need to free it later
+                needs_free = 1;
             } else {
                 dep_path = dep_name[j];
             }
@@ -174,7 +167,6 @@ const add_dependencies_to_cmd -> fn (slice: *Slice, slice_count: *int, config: *
                 *slice_count = *slice_count + 1;
             }
             
-            // Track allocated paths for cleanup
             if (needs_free == 1 && allocated_count < 50) {
                 allocated_std_paths[allocated_count] = dep_path;
                 allocated_count = allocated_count + 1;
@@ -196,27 +188,18 @@ const build_compile_command -> fn (config: *BuildConfig) String {
     
     let slice_count: int = 0;
     
-    // Base command
     slice[slice_count++] = slice.null_terminated_slice("luma ");
     slice[slice_count++] = slice.null_terminated_slice(config.entry_point);
     slice[slice_count++] = slice.null_terminated_slice(" ");
-    
-    // Add libraries flag if needed
     slice[slice_count++] = slice.null_terminated_slice("-l ");
     
-    // Add dependencies and files
     add_dependencies_to_cmd(slice, &slice_count, config);
     
-    // Add output name
     slice[slice_count++] = slice.null_terminated_slice("-name ");
     slice[slice_count++] = slice.null_terminated_slice(config.output_name);
-
-    // Add optimiztion
     slice[slice_count++] = slice.null_terminated_slice(" -O");
     slice[slice_count++] = slice.null_terminated_slice(string::from_int(config.optimize));
-
     slice[slice_count] = NULL_BYTE;
-
 
     let cmd_str: String;
     cmd_str = cmd_str.concat_strs(slice, slice_count);
@@ -268,7 +251,6 @@ const build -> fn (config: *BuildConfig) int {
 const clean -> fn () int {
     io::print("\n=== Cleaning Build Artifacts ===\n", [io::NULL_FORMAT_ARG]);
     
-    
     let confirm: int = gc::get_yes_no("Are you sure you want to clean build artifacts?");
     if (confirm == 0) {
         io::print("Clean operation cancelled.\n\n", [io::NULL_FORMAT_ARG]);
@@ -277,7 +259,6 @@ const clean -> fn () int {
 
     io::print("Cleaning...\n", [io::NULL_FORMAT_ARG]);
     system("sudo rm -rf obj main /tmp/luma_*.txt");
-
     io::print("Cleaned build artifacts successfully.\n\n", [io::NULL_FORMAT_ARG]);
     return 0;
 }
@@ -344,7 +325,7 @@ pub const main -> fn (argc: int, argv: **byte) int {
                     cast<*byte>(&entry_buffer),
                     256
                 );
-                auto_entry = cast<*byte>(0); // stack buffer, don't free
+                auto_entry = cast<*byte>(0);
             }
         }
 
@@ -393,17 +374,14 @@ pub const main -> fn (argc: int, argv: **byte) int {
         };
 
         let result: int = build(&config);
-
         if (auto_entry != cast<*byte>(0)) free(auto_entry);
-
         return result;
-        
+
     } elif (string::strcmp(cmd, "clean") == 0) {
         return clean();
-        
     } elif (string::strcmp(cmd, "deps") == 0) {
         return show_deps();
-    } elif (string::strcmp(cmd, "version") == 0){
+    } elif (string::strcmp(cmd, "version") == 0) {
         io::print("Luma Build System v1.9", [io::NULL_FORMAT_ARG]);
     } else {
         io::print("\nUnknown command: %s
@@ -419,4 +397,3 @@ Usage:
     
     return 0;
 }
-

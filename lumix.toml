@@ -1,4 +1,5 @@
 [project]
-name      = "myapp"        # output binary name  (same as: lumix build myapp)
-entry     = "src/main.lx"  # entry point file    (auto-detected if omitted)
-optimize  = 2 
+name      = "lumix"
+directory = "src"
+entry     = "src/lumix.lx"
+optimize  = 3

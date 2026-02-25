@@ -185,6 +185,7 @@ pub const parse_toml -> fn () TomlConfig {
 }
 
 /// Free heap-allocated fields inside a TomlConfig.
+#takes_ownership
 pub const free_toml_config -> fn (cfg: *TomlConfig) void {
     if (cfg.name  != cast<*byte>(0)) { free(cfg.name);  cfg.name  = cast<*byte>(0); }
     if (cfg.entry != cast<*byte>(0)) { free(cfg.entry); cfg.entry = cast<*byte>(0); }
