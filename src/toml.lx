@@ -163,7 +163,6 @@ pub const parse_toml -> fn () TomlConfig {
 
             if (string::strcmp(cast<*byte>(&key_buf), "project")  == 0) in_project = 1;
             elif (string::strcmp(cast<*byte>(&key_buf), "output") == 0) in_output  = 1;
-            elif (string::strcmp(cast<*byte>(&key_buf), "run")    == 0) in_run     = 1;
             elif (string::strcmp(cast<*byte>(&key_buf), "build")  == 0) in_build   = 1;
 
             i = skip_line(src, i);
@@ -199,10 +198,6 @@ pub const parse_toml -> fn () TomlConfig {
                     i = read_quoted(src, i, cast<*byte>(&val_buf), 256);
                     cfg.directory = heap_dup(cast<*byte>(&val_buf));
                 }
-            } elif (string::strcmp(cast<*byte>(&key_buf), "optimize") == 0) {
-                let level: int = 0;
-                i = read_int(src, i, &level);
-                cfg.optimize = level;
             }
         }
 
@@ -212,20 +207,6 @@ pub const parse_toml -> fn () TomlConfig {
                     i = i + 1;
                     i = read_quoted(src, i, cast<*byte>(&val_buf), 256);
                     cfg.binary_dir = heap_dup(cast<*byte>(&val_buf));
-                }
-            } elif (string::strcmp(cast<*byte>(&key_buf), "debug") == 0) {
-                let dbg: int = 0;
-                i = read_bool(src, i, &dbg);
-                cfg.debug = dbg;
-            }
-        }
-
-        if (in_run == 1) {
-            if (string::strcmp(cast<*byte>(&key_buf), "args") == 0) {
-                if (src[i] == '"') {
-                    i = i + 1;
-                    i = read_quoted(src, i, cast<*byte>(&val_buf), 256);
-                    cfg.run_args = heap_dup(cast<*byte>(&val_buf));
                 }
             }
         }
@@ -252,6 +233,5 @@ pub const free_toml_config -> fn (cfg: *TomlConfig) void {
     if (cfg.entry       != cast<*byte>(0)) { free(cfg.entry);       cfg.entry       = cast<*byte>(0); }
     if (cfg.directory   != cast<*byte>(0)) { free(cfg.directory);   cfg.directory   = cast<*byte>(0); }
     if (cfg.binary_dir  != cast<*byte>(0)) { free(cfg.binary_dir);  cfg.binary_dir  = cast<*byte>(0); }
-    if (cfg.run_args    != cast<*byte>(0)) { free(cfg.run_args);    cfg.run_args    = cast<*byte>(0); }
     if (cfg.build_flags != cast<*byte>(0)) { free(cfg.build_flags); cfg.build_flags = cast<*byte>(0); }
 }
