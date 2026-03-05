@@ -225,8 +225,6 @@ const build_compile_command -> fn (config: *BuildConfig) String {
 
     slice[slice_count++] = slice.null_terminated_slice("-name ");
     slice[slice_count++] = slice.null_terminated_slice(full_output);
-    slice[slice_count++] = slice.null_terminated_slice(" -O");
-    slice[slice_count++] = slice.null_terminated_slice(string::from_int(config.optimize));
     slice[slice_count] = NULL_BYTE;
 
     let cmd_str: String;
