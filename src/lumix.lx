@@ -106,6 +106,35 @@ const build_dep_graph -> fn (scan_path: *byte) int {
         g_graph_size = g_graph_size + 1;
     }
 
+    let toml_dep_count: int = toml::get_dep_count();
+    loop [k: int = 0](k < toml_dep_count && g_graph_size < fs::MAX_FILES) : (k = k + 1) {
+        let dep_path: *byte = toml::get_dep_path(k);
+
+        // Skip if already in the graph
+        let already_added: int = 0;
+        loop [j: int = 0](j < g_graph_size) : (j = j + 1) {
+            if (string::strcmp(g_file_paths[j], dep_path) == 0) {
+                already_added = 1;
+                break;
+            }
+        }
+        if (already_added == 1) continue;
+
+        let path_len: int = string::strlen(dep_path);
+        let path_copy: *byte = cast<*byte>(alloc((path_len + 1) * sizeof<byte>));
+        mem::memcpy(cast<*void>(path_copy), cast<*void>(dep_path), path_len);
+        path_copy[path_len] = '\0';
+
+        let import_count: int = 0;
+
+        g_file_paths[g_graph_size] = path_copy;
+        g_module_names[g_graph_size] = module::extract_module_name(path_copy);
+        g_dependencies[g_graph_size] = parser::find_imports(path_copy, &import_count);
+        g_dep_counts[g_graph_size] = import_count;
+
+        g_graph_size = g_graph_size + 1;
+    }
+
     return g_graph_size;
 }
 
@@ -183,16 +212,6 @@ const build_compile_command -> fn (config: *BuildConfig) String {
     slice[slice_count++] = slice.null_terminated_slice("-l ");
 
     add_dependencies_to_cmd(slice, &slice_count, config);
-
-    let dep_count: int = toml::get_dep_count();
-    loop [k: int = 0](k < dep_count) : (k = k + 1) {
-        let dep_path: *byte = toml::get_dep_path(k);
-        if (string::strcmp(dep_path, config.entry_point) == 0) continue;
-        slice[slice_count] = slice.null_terminated_slice(dep_path);
-        slice_count = slice_count + 1;
-        slice[slice_count] = slice.null_terminated_slice(" ");
-        slice_count = slice_count + 1;
-    }
 
     // build output path: binary_dir/name or just name
     let full_output: *byte;
