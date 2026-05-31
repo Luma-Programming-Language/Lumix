@@ -36,8 +36,6 @@ let g_dependencies: [**byte; 100];
 let g_module_names: [*byte; 100];
 let g_file_paths: [*byte; 100];
 let g_dep_counts: [int; 100];
-let g_in_stack: [int; 100];
-let g_visited: [int; 100];
 let g_graph_size: int = 0;
 
 #returns_ownership
@@ -72,9 +70,6 @@ const find_entry_point -> fn (scan_path: *byte) *byte {
 const build_dep_graph -> fn (scan_path: *byte) int {
     g_graph_size = 0;
 
-    let cwd: *byte = fs::get_cwd();
-    free(cwd);
-
     let file_count: int = 0;
     let files: **byte = fs::scan_directory(scan_path, &file_count);
 
@@ -107,8 +102,6 @@ const build_dep_graph -> fn (scan_path: *byte) int {
         g_module_names[g_graph_size] = module::extract_module_name(filepath);
         g_dependencies[g_graph_size] = parser::find_imports(filepath, &dep_count);
         g_dep_counts[g_graph_size] = dep_count;
-        g_visited[g_graph_size] = 0;
-        g_in_stack[g_graph_size] = 0;
 
         g_graph_size = g_graph_size + 1;
     }
@@ -149,18 +142,13 @@ const convert_std_module_path -> fn (dep_name: *byte) *byte {
 }
 
 const add_dependencies_to_cmd -> fn (slice: *Slice, slice_count: *int, config: *BuildConfig) void {
-    let allocated_std_paths: [*byte; 50];
-    let allocated_count: int = 0;
-
     loop [i: int = 0](i < g_graph_size) : (i = i + 1) {
         loop [j: int = 0](j < g_dep_counts[i]) : (j = j + 1) {
             let dep_name: **byte = g_dependencies[i];
             let dep_path: *byte;
-            let needs_free: int = 0;
 
             if (string::strncmp(dep_name[j], "std_", STD_PREFIX_LEN) == 0) {
                 dep_path = convert_std_module_path(dep_name[j]);
-                needs_free = 1;
             } else {
                 dep_path = dep_name[j];
             }
@@ -171,11 +159,6 @@ const add_dependencies_to_cmd -> fn (slice: *Slice, slice_count: *int, config: *
                 *slice_count = *slice_count + 1;
                 slice[*slice_count] = slice.null_terminated_slice(" ");
                 *slice_count = *slice_count + 1;
-            }
-
-            if (needs_free == 1 && allocated_count < 50) {
-                allocated_std_paths[allocated_count] = dep_path;
-                allocated_count = allocated_count + 1;
             }
         }
 
@@ -200,6 +183,16 @@ const build_compile_command -> fn (config: *BuildConfig) String {
     slice[slice_count++] = slice.null_terminated_slice("-l ");
 
     add_dependencies_to_cmd(slice, &slice_count, config);
+
+    let dep_count: int = toml::get_dep_count();
+    loop [k: int = 0](k < dep_count) : (k = k + 1) {
+        let dep_path: *byte = toml::get_dep_path(k);
+        if (string::strcmp(dep_path, config.entry_point) == 0) continue;
+        slice[slice_count] = slice.null_terminated_slice(dep_path);
+        slice_count = slice_count + 1;
+        slice[slice_count] = slice.null_terminated_slice(" ");
+        slice_count = slice_count + 1;
+    }
 
     // build output path: binary_dir/name or just name
     let full_output: *byte;
@@ -234,6 +227,19 @@ const build_compile_command -> fn (config: *BuildConfig) String {
     return cmd_str;
 }
 
+const free_dep_graph -> fn () void {
+    loop [i: int = 0](i < g_graph_size) : (i = i + 1) {
+        loop [j: int = 0](j < g_dep_counts[i]) : (j = j + 1) {
+            let deps: **byte = g_dependencies[i];
+            free(deps[j]);
+        }
+        free(g_dependencies[i]);
+        free(g_module_names[i]);
+        free(g_file_paths[i]);
+    }
+    g_graph_size = 0;
+}
+
 const build -> fn (config: *BuildConfig) int {
     io::print("\n=== Building Luma Project ===\n", [io::NULL_FORMAT_ARG]);
     io::print("Entry point: %s\n", [io::str_arg(config.entry_point)]);
@@ -257,21 +263,16 @@ const build -> fn (config: *BuildConfig) int {
     let compile_result: int = system(cmd_str.slice.ptr);
     if (compile_result != 0) {
         io::print_err("\nError: Build failed with exit code %d\n\n", [compile_result]);
+        free_dep_graph();
+        toml::free_dep_paths();
         return compile_result;
     }
 
     io::print("\nBuild completed successfully. Output: %s\n\n",
              [io::str_arg(config.output_name)]);
 
-    loop [i: int = 0](i < g_graph_size) : (i = i + 1) {
-        loop [j: int = 0](j < g_dep_counts[i]) : (j = j + 1) {
-            let deps: **byte = g_dependencies[i];
-            free(deps[j]);
-        }
-        free(g_dependencies[i]);
-        free(g_module_names[i]);
-        free(g_file_paths[i]);
-    }
+    free_dep_graph();
+    toml::free_dep_paths();
 
     return 0;
 }
@@ -447,7 +448,7 @@ pub const main -> fn (argc: int, argv: **byte) int {
     } elif (string::strcmp(cmd, "deps") == 0) {
         return show_deps();
     } elif (string::strcmp(cmd, "version") == 0) {
-        io::print("Luma Build System v1.9", [io::NULL_FORMAT_ARG]);
+        io::print("Luma Build System v1.10", [io::NULL_FORMAT_ARG]);
     } else {
         io::print("\nUnknown command: %s
 Usage:

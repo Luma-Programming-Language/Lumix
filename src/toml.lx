@@ -3,6 +3,7 @@
 @use "std_string" as string
 @use "std_io" as io
 @use "std_memory" as mem
+@use "file_system" as fs
 
 pub const TomlConfig -> struct {
     name:       *byte,
@@ -18,9 +19,13 @@ pub const TomlConfig -> struct {
 
 const TOML_FILE: *byte = "lumix.toml";
 
+const MAX_TOML_DEPS: int = 20;
+let g_dep_paths: [*byte; 20];
+let g_dep_count: int = 0;
+
 /// Skip whitespace (spaces and tabs) in-place, returns new index.
 const skip_ws -> fn (src: *byte, i: int) int {
-    loop (src[i] == ' ' || src[i] == '\t') {
+    loop (src[i] == ' ' || src[i] == '\t' || src[i] == '\r' || src[i] == '\n') {
         i = i + 1;
     }
     return i;
@@ -129,9 +134,11 @@ pub const parse_toml -> fn () TomlConfig {
 
     let i: int = 0;
     let in_project: int = 0;
+    let in_dependency: int = 0;
     let in_output:  int = 0;
-    let in_run:     int = 0;
     let in_build:   int = 0;
+
+    g_dep_count = 0;
 
     let key_buf: [byte; 64];
     let val_buf: [byte; 256];
@@ -157,11 +164,12 @@ pub const parse_toml -> fn () TomlConfig {
             if (src[i] == ']') i = i + 1;
 
             in_project = 0;
+            in_dependency = 0;
             in_output  = 0;
-            in_run     = 0;
             in_build   = 0;
 
             if (string::strcmp(cast<*byte>(&key_buf), "project")  == 0) in_project = 1;
+            elif (string::strcmp(cast<*byte>(&key_buf), "dependencies") == 0) in_dependency = 1;
             elif (string::strcmp(cast<*byte>(&key_buf), "output") == 0) in_output  = 1;
             elif (string::strcmp(cast<*byte>(&key_buf), "build")  == 0) in_build   = 1;
 
@@ -201,6 +209,46 @@ pub const parse_toml -> fn () TomlConfig {
             }
         }
 
+        if (in_dependency == 1) {
+            if (string::strcmp(cast<*byte>(&key_buf), "paths") == 0) {
+                if (src[i] == '[') {
+                    i = i + 1;
+                    i = skip_ws(src, i);
+                    loop (src[i] != ']' && src[i] != '\0') {
+                        if (src[i] == '"') {
+                            i = i + 1;
+                            i = read_quoted(src, i, cast<*byte>(&val_buf), 256);
+                            let path: *byte = cast<*byte>(&val_buf);
+                            let path_len: int = string::strlen(path);
+                            if (path_len > 3 &&
+                                path[path_len - 3] == '.' &&
+                                path[path_len - 2] == 'l' &&
+                                path[path_len - 1] == 'x') {
+                                if (g_dep_count < MAX_TOML_DEPS) {
+                                    g_dep_paths[g_dep_count] = heap_dup(path);
+                                    g_dep_count = g_dep_count + 1;
+                                }
+                            } else {
+                                let file_count: int = 0;
+                                let files: **byte = fs::scan_directory(path, &file_count);
+                                loop [j: int = 0](j < file_count && g_dep_count < MAX_TOML_DEPS) : (j = j + 1) {
+                                    g_dep_paths[g_dep_count] = files[j];
+                                    g_dep_count = g_dep_count + 1;
+                                }
+                                free(files);
+                            }
+                        }
+                        i = skip_ws(src, i);
+                        if (src[i] == ',') {
+                            i = i + 1;
+                            i = skip_ws(src, i);
+                        }
+                    }
+                    if (src[i] == ']') i = i + 1;
+                }
+            }
+        }
+
         if (in_output == 1) {
             if (string::strcmp(cast<*byte>(&key_buf), "binary_dir") == 0) {
                 if (src[i] == '"') {
@@ -234,4 +282,21 @@ pub const free_toml_config -> fn (cfg: *TomlConfig) void {
     if (cfg.directory   != cast<*byte>(0)) { free(cfg.directory);   cfg.directory   = cast<*byte>(0); }
     if (cfg.binary_dir  != cast<*byte>(0)) { free(cfg.binary_dir);  cfg.binary_dir  = cast<*byte>(0); }
     if (cfg.build_flags != cast<*byte>(0)) { free(cfg.build_flags); cfg.build_flags = cast<*byte>(0); }
+}
+
+pub const get_dep_count -> fn () int {
+    return g_dep_count;
+}
+
+pub const get_dep_path -> fn (i: int) *byte {
+    if (i >= 0 && i < g_dep_count) return g_dep_paths[i];
+    return cast<*byte>(0);
+}
+
+pub const free_dep_paths -> fn () void {
+    loop [i: int = 0](i < g_dep_count) : (i = i + 1) {
+        free(g_dep_paths[i]);
+        g_dep_paths[i] = cast<*byte>(0);
+    }
+    g_dep_count = 0;
 }

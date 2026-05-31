@@ -60,8 +60,9 @@ The build process:
 3. **Resolves the scan directory** — TOML `directory` field, defaulting to `.`
 4. **Resolves the binary output directory** — TOML `binary_dir` field (optional)
 5. **Resolves build flags** — TOML `build_flags` field (optional)
-6. **Builds the dependency graph** by scanning all `.lx` files in the scan directory
-7. **Constructs and executes** the `luma` compile command
+6. **Resolves dependency paths** — `[dependencies].paths` entries ending in `.lx` are treated as files; entries without `.lx` are scanned as directories for all `.lx` files
+7. **Builds the dependency graph** by scanning all `.lx` files in the scan directory
+8. **Constructs and executes** the `luma` compile command, including all resolved dependency files
 
 **Example output:**
 
@@ -142,6 +143,12 @@ name      = "lumix"
 directory = "src"
 entry     = "src/lumix.lx"
 
+[dependencies]
+paths = [
+    "libs/sdl2/",
+    "lib/audio.lx"
+]
+
 [build]
 flags = "--no-sanitize -O3"
 
@@ -158,6 +165,11 @@ binary_dir = "bin"
 | `name` | string | Output binary name | Required (or pass as CLI arg) |
 | `entry` | string | Path to the entry point `.lx` file | Auto-detected |
 | `directory` | string | Directory to scan for `.lx` source files | `.` (current directory) |
+
+#### `[dependencies]`
+| Field | Type | Description | Default |
+|-------|------|-------------|---------|
+| `paths` | array of strings | Extra source files or directories to include. Paths ending in `.lx` are added as files; all others are scanned recursively for `.lx` files (e.g. `"libs/sdl2/"` includes every `.lx` under `libs/sdl2/`) | *(none)* |
 
 #### `[build]`
 
@@ -180,6 +192,7 @@ When both `lumix.toml` and command-line arguments are present, the following pri
 - **Scan directory:** `[project] directory` > `.`
 - **Binary directory:** `[output] binary_dir` > current directory
 - **Build flags:** `[build] flags` > *(none)*
+- **Dependency paths:** `[dependencies] paths` — appended as extra source files; directories expanded to all `.lx` files
 
 ### Comments
 
@@ -238,8 +251,10 @@ Standard library modules are converted automatically:
 Lumix constructs a command of the form:
 
 ```bash
-luma <entry_point> -l <std_libs> <other_files> [build_flags] -name <binary_dir/output_name>
+luma <entry_point> -l <std_libs> <other_files> <dep_paths> [build_flags] -name <binary_dir/output_name>
 ```
+
+Dependency paths from `[dependencies].paths` are appended after the scanned source files. Directories are expanded into individual `.lx` files during command construction.
 
 ### 6. Deduplication
 

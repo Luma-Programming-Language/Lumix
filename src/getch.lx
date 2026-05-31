@@ -2,52 +2,10 @@
 
 @use "std_io" as io
 
-// Platform detection constants
-const PLATFORM_UNIX: int = 1;
-const PLATFORM_WINDOWS: int = 2;
-
-// Detect platform at compile time based on typical indicators
-// This is a simplified approach - you may need to adjust based on your compiler's defines
-const detect_platform -> fn () int {
-    // For now, we'll assume Unix/Linux/Mac
-    // In a real implementation, youd check compiler defines
-    return PLATFORM_UNIX;
-}
-
-// Unix/Linux/Mac implementation using stty
-pub const getch_unix -> fn () byte {
-    // Save current terminal settings
-    system("stty -echo -icanon min 1 time 0");
-    
-    // Read single character
-    let c: byte = input<byte>("");
-    
-    // Restore terminal settings
-    system("stty echo icanon");
-    
-    return c;
-}
-
-// Windows implementation would use conio.h _getch()
-// Since Luma may not have direct C library bindings, we use a workaround
-pub const getch_windows -> fn () byte {
-    // On Windows, you might need to call a C function or use
-    // a different approach. For now, this is a placeholder.
-    // You could compile a small C helper and call it via system()
-    
-    let c: byte = input<byte>("");
-    return c;
-}
-
-// Cross-platform getch function
 pub const getch -> fn () byte {
-    let platform: int = detect_platform();
-    
-    if (platform == PLATFORM_UNIX) {
-        return getch_unix();
-    } else {
-        return getch_windows();
-    }
+    let c: int = 0;
+    __syscall__(0, 0, &c, 1); // syscall for read(0, &c, 1)
+    return cast<byte>(c);
 }
 
 // Wait for any key press

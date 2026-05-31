@@ -1,7 +1,6 @@
 @module "parse" 
 
 @use "std_string" as string
-@use "std_memory" as mem
 @use "utility" as util
 @use "std_io" as io
 
