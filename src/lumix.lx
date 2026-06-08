@@ -41,6 +41,28 @@ let g_graph_size: int = 0;
 let g_converted_paths: [*byte; 200];
 let g_converted_count: int = 0;
 
+/// Join dir and name with a '/' separator into a newly allocated string.
+const join_path -> fn (dir: *byte, name: *byte, out: **byte) void {
+    let dir_len: int = string::strlen(dir);
+    let name_len: int = string::strlen(name);
+    let full: *byte = cast<*byte>(alloc((dir_len + 1 + name_len + 1) * sizeof<byte>));
+    mem::memcpy(cast<*void>(full), cast<*void>(dir), dir_len);
+    full[dir_len] = '/';
+    mem::memcpy(cast<*void>(&full[dir_len + 1]), cast<*void>(name), name_len);
+    full[dir_len + 1 + name_len] = '\0';
+    *out = full;
+}
+
+/// Print a config field with quotes around the value, or a default if null.
+const print_field -> fn (label: *byte, val: *byte, default_str: *byte) void {
+    io::print("  %s = ", [io::str_arg(label)]);
+    if (val != cast<*byte>(0)) {
+        io::print("%c%s%c\n", [io::byte_arg('"'), io::str_arg(val), io::byte_arg('"')]);
+    } else {
+        io::print("%s\n", [io::str_arg(default_str)]);
+    }
+}
+
 #returns_ownership
 const find_entry_point -> fn (scan_path: *byte) *byte {
     let file_count: int = 0;
@@ -219,18 +241,11 @@ const build_compile_command -> fn (config: *BuildConfig) String {
 
     add_dependencies_to_cmd(slice, &slice_count, config);
 
-    // build output path: binary_dir/name or just name
     let full_output: *byte;
     let needs_free_output: int = 0;
 
     if (config.binary_dir != cast<*byte>(0)) {
-        let dir_len:  int = string::strlen(config.binary_dir);
-        let name_len: int = string::strlen(config.output_name);
-        full_output = cast<*byte>(alloc((dir_len + 1 + name_len + 1) * sizeof<byte>));
-        mem::memcpy(cast<*void>(full_output), cast<*void>(config.binary_dir), dir_len);
-        full_output[dir_len] = '/';
-        mem::memcpy(cast<*void>(&full_output[dir_len + 1]), cast<*void>(config.output_name), name_len);
-        full_output[dir_len + 1 + name_len] = '\0';
+        join_path(config.binary_dir, config.output_name, &full_output);
         needs_free_output = 1;
     } else {
         full_output = config.output_name;
@@ -383,27 +398,15 @@ const show_config -> fn () int {
     }
 
     io::print("\n[project]\n", [io::NULL_FORMAT_ARG]);
-    io::print("  name      = ", [io::NULL_FORMAT_ARG]);
-    if (tcfg.name != cast<*byte>(0)) { io::print("%c%s%c\n", [io::byte_arg('"'), io::str_arg(tcfg.name), io::byte_arg('"')]); }
-    else                             { io::print("(auto-detect)\n", [io::NULL_FORMAT_ARG]); }
-
-    io::print("  entry     = ", [io::NULL_FORMAT_ARG]);
-    if (tcfg.entry != cast<*byte>(0)) { io::print("%c%s%c\n", [io::byte_arg('"'), io::str_arg(tcfg.entry), io::byte_arg('"')]); }
-    else                             { io::print("(auto-detect)\n", [io::NULL_FORMAT_ARG]); }
-
-    io::print("  directory = ", [io::NULL_FORMAT_ARG]);
-    if (tcfg.directory != cast<*byte>(0)) { io::print("%c%s%c\n", [io::byte_arg('"'), io::str_arg(tcfg.directory), io::byte_arg('"')]); }
-    else                                  { io::print(".\n", [io::NULL_FORMAT_ARG]); }
+    print_field("name",      tcfg.name,      "(auto-detect)");
+    print_field("entry",     tcfg.entry,     "(auto-detect)");
+    print_field("directory", tcfg.directory, ".");
 
     io::print("\n[build]\n", [io::NULL_FORMAT_ARG]);
-    io::print("  flags     = ", [io::NULL_FORMAT_ARG]);
-    if (tcfg.build_flags != cast<*byte>(0)) { io::print("%c%s%c\n", [io::byte_arg('"'), io::str_arg(tcfg.build_flags), io::byte_arg('"')]); }
-    else                                    { io::print("(none)\n", [io::NULL_FORMAT_ARG]); }
+    print_field("flags", tcfg.build_flags, "(none)");
 
     io::print("\n[output]\n", [io::NULL_FORMAT_ARG]);
-    io::print("  binary_dir = ", [io::NULL_FORMAT_ARG]);
-    if (tcfg.binary_dir != cast<*byte>(0)) { io::print("%c%s%c\n", [io::byte_arg('"'), io::str_arg(tcfg.binary_dir), io::byte_arg('"')]); }
-    else                                   { io::print("(current dir)\n", [io::NULL_FORMAT_ARG]); }
+    print_field("binary_dir", tcfg.binary_dir, "(current dir)");
 
     io::print("\n[dependencies]\n", [io::NULL_FORMAT_ARG]);
     io::print("  paths     = ", [io::NULL_FORMAT_ARG]);
@@ -418,11 +421,8 @@ const show_config -> fn () int {
     }
 
     io::print("\n[run]\n", [io::NULL_FORMAT_ARG]);
-    io::print("  args      = ", [io::NULL_FORMAT_ARG]);
-    if (tcfg.run_args != cast<*byte>(0)) { io::print("%c%s%c\n", [io::byte_arg('"'), io::str_arg(tcfg.run_args), io::byte_arg('"')]); }
-    else                                 { io::print("(none)\n", [io::NULL_FORMAT_ARG]); }
+    print_field("args", tcfg.run_args, "(none)");
 
-    // Auto-detected values
     io::print("\n--- Auto-Detected ---\n", [io::NULL_FORMAT_ARG]);
     let auto_entry: *byte = find_entry_point(".");
     if (auto_entry != cast<*byte>(0)) {
@@ -474,63 +474,39 @@ const run_binary -> fn () int {
         scan_dir = tcfg.directory;
     }
 
-    let binary_dir: *byte = cast<*byte>(0);
-    if (tcfg.binary_dir != cast<*byte>(0)) {
-        binary_dir = tcfg.binary_dir;
-    }
-
-    let run_args: *byte = cast<*byte>(0);
-    if (tcfg.run_args != cast<*byte>(0)) {
-        run_args = tcfg.run_args;
-    }
-
-    let build_flags: *byte = cast<*byte>(0);
-    if (tcfg.build_flags != cast<*byte>(0)) {
-        build_flags = tcfg.build_flags;
-    }
-
     let config: BuildConfig = BuildConfig {
         entry_point:   entry_point,
         output_name:   output_name,
         stdlib_path:   "std",
         scan_path:     scan_dir,
-        binary_dir:    binary_dir,
-        run_args:      run_args,
-        build_flags:   build_flags,
+        binary_dir:    tcfg.binary_dir,
+        run_args:      tcfg.run_args,
+        build_flags:   tcfg.build_flags,
         optimize:      0,
         debug_symbols: 1,
         verbose:       1
     };
 
-    // Build the project
     let build_result: int = build(&config);
     if (build_result != 0) {
         if (auto_entry != cast<*byte>(0)) free(auto_entry);
         return build_result;
     }
 
-    // Construct binary path
     let full_path: *byte;
     let needs_free: int = 0;
 
-    if (binary_dir != cast<*byte>(0)) {
-        let dir_len: int = string::strlen(binary_dir);
-        let name_len: int = string::strlen(output_name);
-        full_path = cast<*byte>(alloc((dir_len + 1 + name_len + 1) * sizeof<byte>));
-        mem::memcpy(cast<*void>(full_path), cast<*void>(binary_dir), dir_len);
-        full_path[dir_len] = '/';
-        mem::memcpy(cast<*void>(&full_path[dir_len + 1]), cast<*void>(output_name), name_len);
-        full_path[dir_len + 1 + name_len] = '\0';
+    if (tcfg.binary_dir != cast<*byte>(0)) {
+        join_path(tcfg.binary_dir, output_name, &full_path);
         needs_free = 1;
     } else {
         full_path = output_name;
     }
 
-    // Build run command: ./<path> [args]
     let path_len: int = string::strlen(full_path);
     let cmd_len: int = path_len + 1;
-    if (run_args != cast<*byte>(0)) {
-        cmd_len = cmd_len + 1 + string::strlen(run_args);
+    if (tcfg.run_args != cast<*byte>(0)) {
+        cmd_len = cmd_len + 1 + string::strlen(tcfg.run_args);
     }
 
     let run_cmd: *byte = cast<*byte>(alloc(cmd_len * sizeof<byte>));
@@ -538,11 +514,11 @@ const run_binary -> fn () int {
 
     mem::memcpy(cast<*void>(run_cmd), cast<*void>(full_path), path_len);
     let offset: int = path_len;
-    if (run_args != cast<*byte>(0)) {
+    if (tcfg.run_args != cast<*byte>(0)) {
         run_cmd[offset] = ' ';
         offset = offset + 1;
-        let args_len: int = string::strlen(run_args);
-        mem::memcpy(cast<*void>(&run_cmd[offset]), cast<*void>(run_args), args_len);
+        let args_len: int = string::strlen(tcfg.run_args);
+        mem::memcpy(cast<*void>(&run_cmd[offset]), cast<*void>(tcfg.run_args), args_len);
         offset = offset + args_len;
     }
     run_cmd[offset] = '\0';
@@ -629,28 +605,9 @@ const handle_build -> fn (argc: int, argv: **byte) int {
     let dbg: int = 1;
     if (tcfg.debug >= 0) dbg = tcfg.debug;
 
-    // --- Resolve scan directory ---
     let scan_dir: *byte = ".";
     if (tcfg.directory != cast<*byte>(0)) {
         scan_dir = tcfg.directory;
-    }
-
-    // --- Resolve binary_dir ---
-    let binary_dir: *byte = cast<*byte>(0);
-    if (tcfg.binary_dir != cast<*byte>(0)) {
-        binary_dir = tcfg.binary_dir;
-    }
-
-    // --- Resolve run_args ---
-    let run_args: *byte = cast<*byte>(0);
-    if (tcfg.run_args != cast<*byte>(0)) {
-        run_args = tcfg.run_args;
-    }
-
-    // --- Resolve build flags ---
-    let build_flags: *byte = cast<*byte>(0);
-    if (tcfg.build_flags != cast<*byte>(0)) {
-        build_flags = tcfg.build_flags;
     }
 
     let config: BuildConfig = BuildConfig {
@@ -658,9 +615,9 @@ const handle_build -> fn (argc: int, argv: **byte) int {
         output_name:   output_name,
         stdlib_path:   "std",
         scan_path:     scan_dir,
-        binary_dir:    binary_dir,
-        run_args:      run_args,
-        build_flags:   build_flags,
+        binary_dir:    tcfg.binary_dir,
+        run_args:      tcfg.run_args,
+        build_flags:   tcfg.build_flags,
         optimize:      level,
         debug_symbols: dbg,
         verbose:       1

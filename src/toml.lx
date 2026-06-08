@@ -13,7 +13,7 @@ pub const TomlConfig -> struct {
     found:      int,
     binary_dir: *byte,
     debug:      int,
-    run_args:   *byte, 
+    run_args:   *byte,
     build_flags: *byte
 };
 
@@ -82,6 +82,18 @@ const read_unquoted -> fn (src: *byte, i: int, dest: *byte, max: int) int {
         n = n - 1;
     }
     dest[n] = '\0';
+    return i;
+}
+
+/// Read a value (quoted or unquoted) into dest, advancing past the opening `"` if quoted.
+/// Returns the next position after the value.
+const read_toml_value -> fn (src: *byte, i: int, dest: *byte, max: int) int {
+    if (src[i] == '"') {
+        i = i + 1;
+        i = read_quoted(src, i, dest, max);
+    } else {
+        i = read_unquoted(src, i, dest, max);
+    }
     return i;
 }
 
@@ -189,32 +201,14 @@ pub const parse_toml -> fn () TomlConfig {
 
         if (in_project == 1) {
             if (string::strcmp(cast<*byte>(&key_buf), "name") == 0) {
-                if (src[i] == '"') {
-                    i = i + 1;
-                    i = read_quoted(src, i, cast<*byte>(&val_buf), 256);
-                    cfg.name = heap_dup(cast<*byte>(&val_buf));
-                } else {
-                    i = read_unquoted(src, i, cast<*byte>(&val_buf), 256);
-                    if (val_buf[0] != '\0') cfg.name = heap_dup(cast<*byte>(&val_buf));
-                }
+                i = read_toml_value(src, i, cast<*byte>(&val_buf), 256);
+                if (val_buf[0] != '\0') cfg.name = heap_dup(cast<*byte>(&val_buf));
             } elif (string::strcmp(cast<*byte>(&key_buf), "entry") == 0) {
-                if (src[i] == '"') {
-                    i = i + 1;
-                    i = read_quoted(src, i, cast<*byte>(&val_buf), 256);
-                    cfg.entry = heap_dup(cast<*byte>(&val_buf));
-                } else {
-                    i = read_unquoted(src, i, cast<*byte>(&val_buf), 256);
-                    if (val_buf[0] != '\0') cfg.entry = heap_dup(cast<*byte>(&val_buf));
-                }
+                i = read_toml_value(src, i, cast<*byte>(&val_buf), 256);
+                if (val_buf[0] != '\0') cfg.entry = heap_dup(cast<*byte>(&val_buf));
             } elif (string::strcmp(cast<*byte>(&key_buf), "directory") == 0) {
-                if (src[i] == '"') {
-                    i = i + 1;
-                    i = read_quoted(src, i, cast<*byte>(&val_buf), 256);
-                    cfg.directory = heap_dup(cast<*byte>(&val_buf));
-                } else {
-                    i = read_unquoted(src, i, cast<*byte>(&val_buf), 256);
-                    if (val_buf[0] != '\0') cfg.directory = heap_dup(cast<*byte>(&val_buf));
-                }
+                i = read_toml_value(src, i, cast<*byte>(&val_buf), 256);
+                if (val_buf[0] != '\0') cfg.directory = heap_dup(cast<*byte>(&val_buf));
             }
         }
 
@@ -260,40 +254,22 @@ pub const parse_toml -> fn () TomlConfig {
 
         if (in_output == 1) {
             if (string::strcmp(cast<*byte>(&key_buf), "binary_dir") == 0) {
-                if (src[i] == '"') {
-                    i = i + 1;
-                    i = read_quoted(src, i, cast<*byte>(&val_buf), 256);
-                    cfg.binary_dir = heap_dup(cast<*byte>(&val_buf));
-                } else {
-                    i = read_unquoted(src, i, cast<*byte>(&val_buf), 256);
-                    if (val_buf[0] != '\0') cfg.binary_dir = heap_dup(cast<*byte>(&val_buf));
-                }
+                i = read_toml_value(src, i, cast<*byte>(&val_buf), 256);
+                if (val_buf[0] != '\0') cfg.binary_dir = heap_dup(cast<*byte>(&val_buf));
             }
         }
 
         if (in_build == 1) {
             if (string::strcmp(cast<*byte>(&key_buf), "flags") == 0) {
-                if (src[i] == '"') {
-                    i = i + 1;
-                    i = read_quoted(src, i, cast<*byte>(&val_buf), 256);
-                    cfg.build_flags = heap_dup(cast<*byte>(&val_buf));
-                } else {
-                    i = read_unquoted(src, i, cast<*byte>(&val_buf), 256);
-                    if (val_buf[0] != '\0') cfg.build_flags = heap_dup(cast<*byte>(&val_buf));
-                }
+                i = read_toml_value(src, i, cast<*byte>(&val_buf), 256);
+                if (val_buf[0] != '\0') cfg.build_flags = heap_dup(cast<*byte>(&val_buf));
             }
         }
 
         if (in_run == 1) {
             if (string::strcmp(cast<*byte>(&key_buf), "args") == 0) {
-                if (src[i] == '"') {
-                    i = i + 1;
-                    i = read_quoted(src, i, cast<*byte>(&val_buf), 256);
-                    cfg.run_args = heap_dup(cast<*byte>(&val_buf));
-                } else {
-                    i = read_unquoted(src, i, cast<*byte>(&val_buf), 256);
-                    if (val_buf[0] != '\0') cfg.run_args = heap_dup(cast<*byte>(&val_buf));
-                }
+                i = read_toml_value(src, i, cast<*byte>(&val_buf), 256);
+                if (val_buf[0] != '\0') cfg.run_args = heap_dup(cast<*byte>(&val_buf));
             }
         }
 

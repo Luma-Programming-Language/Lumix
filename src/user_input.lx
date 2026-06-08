@@ -14,7 +14,7 @@ const read_line -> fn (buffer: *byte, max_len: int) void {
 pub const get_user_input -> fn (prompt: *byte, default_value: *byte, buffer: *byte, buffer_size: int) *byte {
     output(prompt);
     read_line(buffer, buffer_size);
-    
+
     if (buffer[0] == '\0') {
         return default_value;
     }

@@ -11,13 +11,13 @@ pub const getch -> fn () byte {
 // Get yes/no answer
 pub const get_yes_no -> fn (prompt: *byte) int {
     io::print("%s (y/n): ", [io::str_arg(prompt)]);
-    
+
     let c: byte = getch();
     io::print("%c\n", [io::byte_arg(c)]);
-    
+
     if (c == 'y' || c == 'Y') return 1;
     if (c == 'n' || c == 'N' || c == '\0') return 0;
-    
+
     // Invalid input, ask again
     io::print("Invalid input. ", [io::NULL_FORMAT_ARG]);
     return get_yes_no(prompt);

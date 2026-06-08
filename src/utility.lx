@@ -7,9 +7,9 @@
 pub const file_exists -> fn (filepath: *byte) int {
     let content: *byte = io::read_file(filepath);
     defer { free(content); }
- 
+
     if (content != cast<*byte>(0)) return 1;
-    return 0; 
+    return 0;
 }
 
 pub const strip_trailing_newline -> fn (s: *byte) void {
@@ -22,9 +22,9 @@ pub const strip_trailing_newline -> fn (s: *byte) void {
 pub const has_extension -> fn (filepath: *byte, ext: *byte) int {
     let len: int = string::strlen(filepath);
     let ext_len: int = string::strlen(ext);
-    
+
     if (len < ext_len) return 0;
-    
+
     loop [i: int = 0](i < ext_len) : (i = i + 1) {
         if (filepath[len - ext_len + i] != ext[i]) return 0;
     }
@@ -34,7 +34,7 @@ pub const has_extension -> fn (filepath: *byte, ext: *byte) int {
 #returns_ownership
 pub const clean_dotslash_prefix -> fn (filepath: *byte) *byte {
     let len: int = string::strlen(filepath);
-    
+
     if (len >= 2 && filepath[0] == '.' && filepath[1] == '/') {
         let clean_path: *byte = cast<*byte>(alloc((len - 1) * sizeof<byte>));
         mem::memcpy(cast<*void>(clean_path), cast<*void>(&filepath[2]), len - 2);
@@ -42,7 +42,7 @@ pub const clean_dotslash_prefix -> fn (filepath: *byte) *byte {
         free(filepath);
         return clean_path;
     }
-    
+
     return filepath;
 }
 
