@@ -42,6 +42,7 @@ let g_converted_paths: [*byte; 200];
 let g_converted_count: int = 0;
 
 /// Join dir and name with a '/' separator into a newly allocated string.
+#returns_ownership
 const join_path -> fn (dir: *byte, name: *byte, out: **byte) void {
     let dir_len: int = string::strlen(dir);
     let name_len: int = string::strlen(name);
