@@ -38,6 +38,9 @@ let g_file_paths: [*byte; 100];
 let g_dep_counts: [int; 100];
 let g_graph_size: int = 0;
 
+let g_converted_paths: [*byte; 200];
+let g_converted_count: int = 0;
+
 #returns_ownership
 const find_entry_point -> fn (scan_path: *byte) *byte {
     let file_count: int = 0;
@@ -66,7 +69,6 @@ const find_entry_point -> fn (scan_path: *byte) *byte {
     return entry_point;
 }
 
-#takes_ownership
 const build_dep_graph -> fn (scan_path: *byte) int {
     g_graph_size = 0;
 
@@ -89,7 +91,8 @@ const build_dep_graph -> fn (scan_path: *byte) int {
     loop [i: int = 0](i < file_count && g_graph_size < fs::MAX_FILES) : (i = i + 1) {
         let filepath: *byte = files[i];
 
-        if (module::extract_module_name(filepath) == cast<*byte>(0)) {
+        g_module_names[g_graph_size] = module::extract_module_name(filepath);
+        if (g_module_names[g_graph_size] == cast<*byte>(0)) {
             io::print("Warning: Could not extract module name from %s\n",
                         [io::str_arg(filepath)]);
             free(filepath);
@@ -99,7 +102,6 @@ const build_dep_graph -> fn (scan_path: *byte) int {
         let dep_count: int = 0;
 
         g_file_paths[g_graph_size] = filepath;
-        g_module_names[g_graph_size] = module::extract_module_name(filepath);
         g_dependencies[g_graph_size] = parser::find_imports(filepath, &dep_count);
         g_dep_counts[g_graph_size] = dep_count;
 
@@ -121,15 +123,14 @@ const build_dep_graph -> fn (scan_path: *byte) int {
         if (already_added == 1) continue;
 
         let path_len: int = string::strlen(dep_path);
-        let path_copy: *byte = cast<*byte>(alloc((path_len + 1) * sizeof<byte>));
-        mem::memcpy(cast<*void>(path_copy), cast<*void>(dep_path), path_len);
-        path_copy[path_len] = '\0';
+        g_file_paths[g_graph_size] = cast<*byte>(alloc((path_len + 1) * sizeof<byte>));
+        mem::memcpy(cast<*void>(g_file_paths[g_graph_size]), cast<*void>(dep_path), path_len);
+        g_file_paths[g_graph_size][path_len] = '\0';
 
         let import_count: int = 0;
 
-        g_file_paths[g_graph_size] = path_copy;
-        g_module_names[g_graph_size] = module::extract_module_name(path_copy);
-        g_dependencies[g_graph_size] = parser::find_imports(path_copy, &import_count);
+        g_module_names[g_graph_size] = module::extract_module_name(g_file_paths[g_graph_size]);
+        g_dependencies[g_graph_size] = parser::find_imports(g_file_paths[g_graph_size], &import_count);
         g_dep_counts[g_graph_size] = import_count;
 
         g_graph_size = g_graph_size + 1;
@@ -170,6 +171,7 @@ const convert_std_module_path -> fn (dep_name: *byte) *byte {
     return dep_path;
 }
 
+#returns_ownership
 const add_dependencies_to_cmd -> fn (slice: *Slice, slice_count: *int, config: *BuildConfig) void {
     loop [i: int = 0](i < g_graph_size) : (i = i + 1) {
         loop [j: int = 0](j < g_dep_counts[i]) : (j = j + 1) {
@@ -178,6 +180,10 @@ const add_dependencies_to_cmd -> fn (slice: *Slice, slice_count: *int, config: *
 
             if (string::strncmp(dep_name[j], "std_", STD_PREFIX_LEN) == 0) {
                 dep_path = convert_std_module_path(dep_name[j]);
+                if (g_converted_count < 200) {
+                    g_converted_paths[g_converted_count] = dep_path;
+                    g_converted_count = g_converted_count + 1;
+                }
             } else {
                 dep_path = dep_name[j];
             }
@@ -243,6 +249,13 @@ const build_compile_command -> fn (config: *BuildConfig) String {
     cmd_str = cmd_str.concat_strs(slice, slice_count);
 
     if (needs_free_output == 1) free(full_output);
+
+    loop [i: int = 0](i < g_converted_count) : (i = i + 1) {
+        free(g_converted_paths[i]);
+        g_converted_paths[i] = cast<*byte>(0);
+    }
+    g_converted_count = 0;
+
     return cmd_str;
 }
 
@@ -306,7 +319,7 @@ const clean -> fn () int {
     }
 
     io::print("Cleaning...\n", [io::NULL_FORMAT_ARG]);
-    system("sudo rm -rf obj main /tmp/luma_*.txt");
+    system("rm -rf obj main /tmp/luma_*.txt");
     io::print("Cleaned build artifacts successfully.\n\n", [io::NULL_FORMAT_ARG]);
     return 0;
 }
@@ -336,149 +349,360 @@ const show_deps -> fn () int {
     }
 
     io::print("\n", [io::NULL_FORMAT_ARG]);
+    free_dep_graph();
     return 0;
+}
+
+const init_project -> fn () int {
+    io::print("\n=== Initializing Lumix Project ===\n", [io::NULL_FORMAT_ARG]);
+
+    if (util::file_exists("lumix.toml") == 1) {
+        let overwrite: int = gc::get_yes_no("lumix.toml already exists. Overwrite?");
+        if (overwrite == 0) {
+            io::print("Init cancelled.\n\n", [io::NULL_FORMAT_ARG]);
+            return 0;
+        }
+    }
+
+    io::print("Creating lumix.toml...\n", [io::NULL_FORMAT_ARG]);
+    system("cat > lumix.toml << 'EOF'\n[project]\nname = myapp\ndirectory = src\nentry = src/main.lx\n\n[build]\nflags = --no-sanitize -O3\n\n[output]\nbinary_dir = bin\nEOF");
+    io::print("Created lumix.toml. Edit it to configure your project.\n\n", [io::NULL_FORMAT_ARG]);
+    return 0;
+}
+
+const show_config -> fn () int {
+    io::print("\n=== Configuration ===\n", [io::NULL_FORMAT_ARG]);
+
+    let tcfg: TomlConfig = toml::parse_toml();
+    defer { toml::free_toml_config(&tcfg); }
+
+    if (tcfg.found == 1) {
+        io::print("Config file: lumix.toml\n", [io::NULL_FORMAT_ARG]);
+    } else {
+        io::print("Config file: (not found, using defaults)\n", [io::NULL_FORMAT_ARG]);
+    }
+
+    io::print("\n[project]\n", [io::NULL_FORMAT_ARG]);
+    io::print("  name      = ", [io::NULL_FORMAT_ARG]);
+    if (tcfg.name != cast<*byte>(0)) { io::print("%c%s%c\n", [io::byte_arg('"'), io::str_arg(tcfg.name), io::byte_arg('"')]); }
+    else                             { io::print("(auto-detect)\n", [io::NULL_FORMAT_ARG]); }
+
+    io::print("  entry     = ", [io::NULL_FORMAT_ARG]);
+    if (tcfg.entry != cast<*byte>(0)) { io::print("%c%s%c\n", [io::byte_arg('"'), io::str_arg(tcfg.entry), io::byte_arg('"')]); }
+    else                             { io::print("(auto-detect)\n", [io::NULL_FORMAT_ARG]); }
+
+    io::print("  directory = ", [io::NULL_FORMAT_ARG]);
+    if (tcfg.directory != cast<*byte>(0)) { io::print("%c%s%c\n", [io::byte_arg('"'), io::str_arg(tcfg.directory), io::byte_arg('"')]); }
+    else                                  { io::print(".\n", [io::NULL_FORMAT_ARG]); }
+
+    io::print("\n[build]\n", [io::NULL_FORMAT_ARG]);
+    io::print("  flags     = ", [io::NULL_FORMAT_ARG]);
+    if (tcfg.build_flags != cast<*byte>(0)) { io::print("%c%s%c\n", [io::byte_arg('"'), io::str_arg(tcfg.build_flags), io::byte_arg('"')]); }
+    else                                    { io::print("(none)\n", [io::NULL_FORMAT_ARG]); }
+
+    io::print("\n[output]\n", [io::NULL_FORMAT_ARG]);
+    io::print("  binary_dir = ", [io::NULL_FORMAT_ARG]);
+    if (tcfg.binary_dir != cast<*byte>(0)) { io::print("%c%s%c\n", [io::byte_arg('"'), io::str_arg(tcfg.binary_dir), io::byte_arg('"')]); }
+    else                                   { io::print("(current dir)\n", [io::NULL_FORMAT_ARG]); }
+
+    io::print("\n[dependencies]\n", [io::NULL_FORMAT_ARG]);
+    io::print("  paths     = ", [io::NULL_FORMAT_ARG]);
+    let dep_count: int = toml::get_dep_count();
+    if (dep_count > 0) {
+        io::print("\n", [io::NULL_FORMAT_ARG]);
+        loop [i: int = 0](i < dep_count) : (i = i + 1) {
+            io::print("    - %c%s%c\n", [io::byte_arg('"'), io::str_arg(toml::get_dep_path(i)), io::byte_arg('"')]);
+        }
+    } else {
+        io::print("(none)\n", [io::NULL_FORMAT_ARG]);
+    }
+
+    io::print("\n[run]\n", [io::NULL_FORMAT_ARG]);
+    io::print("  args      = ", [io::NULL_FORMAT_ARG]);
+    if (tcfg.run_args != cast<*byte>(0)) { io::print("%c%s%c\n", [io::byte_arg('"'), io::str_arg(tcfg.run_args), io::byte_arg('"')]); }
+    else                                 { io::print("(none)\n", [io::NULL_FORMAT_ARG]); }
+
+    // Auto-detected values
+    io::print("\n--- Auto-Detected ---\n", [io::NULL_FORMAT_ARG]);
+    let auto_entry: *byte = find_entry_point(".");
+    if (auto_entry != cast<*byte>(0)) {
+        io::print("  entry     = %c%s%c\n", [io::byte_arg('"'), io::str_arg(auto_entry), io::byte_arg('"')]);
+        free(auto_entry);
+    } else {
+        io::print("  entry     = (not found)\n", [io::NULL_FORMAT_ARG]);
+    }
+
+    io::print("\n", [io::NULL_FORMAT_ARG]);
+    return 0;
+}
+
+const run_binary -> fn () int {
+    // --- Resolve config (same as build) ---
+    let tcfg: TomlConfig = toml::parse_toml();
+    defer { toml::free_toml_config(&tcfg); }
+
+    if (tcfg.found == 1) {
+        io::print("lumix.toml found — using config file.\n", [io::NULL_FORMAT_ARG]);
+    }
+
+    let auto_entry: *byte = cast<*byte>(0);
+    let entry_point: *byte;
+
+    if (tcfg.entry != cast<*byte>(0)) {
+        entry_point = tcfg.entry;
+    } else {
+        auto_entry = find_entry_point(".");
+        if (auto_entry != cast<*byte>(0)) {
+            entry_point = auto_entry;
+        } else {
+            io::print("No entry point auto-detected.\n", [io::NULL_FORMAT_ARG]);
+            return 1;
+        }
+    }
+
+    let output_name: *byte;
+    if (tcfg.name != cast<*byte>(0)) {
+        output_name = tcfg.name;
+    } else {
+        io::print("No output name set. Set 'name' in lumix.toml.\n", [io::NULL_FORMAT_ARG]);
+        if (auto_entry != cast<*byte>(0)) free(auto_entry);
+        return 1;
+    }
+
+    let scan_dir: *byte = ".";
+    if (tcfg.directory != cast<*byte>(0)) {
+        scan_dir = tcfg.directory;
+    }
+
+    let binary_dir: *byte = cast<*byte>(0);
+    if (tcfg.binary_dir != cast<*byte>(0)) {
+        binary_dir = tcfg.binary_dir;
+    }
+
+    let run_args: *byte = cast<*byte>(0);
+    if (tcfg.run_args != cast<*byte>(0)) {
+        run_args = tcfg.run_args;
+    }
+
+    let build_flags: *byte = cast<*byte>(0);
+    if (tcfg.build_flags != cast<*byte>(0)) {
+        build_flags = tcfg.build_flags;
+    }
+
+    let config: BuildConfig = BuildConfig {
+        entry_point:   entry_point,
+        output_name:   output_name,
+        stdlib_path:   "std",
+        scan_path:     scan_dir,
+        binary_dir:    binary_dir,
+        run_args:      run_args,
+        build_flags:   build_flags,
+        optimize:      0,
+        debug_symbols: 1,
+        verbose:       1
+    };
+
+    // Build the project
+    let build_result: int = build(&config);
+    if (build_result != 0) {
+        if (auto_entry != cast<*byte>(0)) free(auto_entry);
+        return build_result;
+    }
+
+    // Construct binary path
+    let full_path: *byte;
+    let needs_free: int = 0;
+
+    if (binary_dir != cast<*byte>(0)) {
+        let dir_len: int = string::strlen(binary_dir);
+        let name_len: int = string::strlen(output_name);
+        full_path = cast<*byte>(alloc((dir_len + 1 + name_len + 1) * sizeof<byte>));
+        mem::memcpy(cast<*void>(full_path), cast<*void>(binary_dir), dir_len);
+        full_path[dir_len] = '/';
+        mem::memcpy(cast<*void>(&full_path[dir_len + 1]), cast<*void>(output_name), name_len);
+        full_path[dir_len + 1 + name_len] = '\0';
+        needs_free = 1;
+    } else {
+        full_path = output_name;
+    }
+
+    // Build run command: ./<path> [args]
+    let path_len: int = string::strlen(full_path);
+    let cmd_len: int = path_len + 1;
+    if (run_args != cast<*byte>(0)) {
+        cmd_len = cmd_len + 1 + string::strlen(run_args);
+    }
+
+    let run_cmd: *byte = cast<*byte>(alloc(cmd_len * sizeof<byte>));
+    defer { free(run_cmd); }
+
+    mem::memcpy(cast<*void>(run_cmd), cast<*void>(full_path), path_len);
+    let offset: int = path_len;
+    if (run_args != cast<*byte>(0)) {
+        run_cmd[offset] = ' ';
+        offset = offset + 1;
+        let args_len: int = string::strlen(run_args);
+        mem::memcpy(cast<*void>(&run_cmd[offset]), cast<*void>(run_args), args_len);
+        offset = offset + args_len;
+    }
+    run_cmd[offset] = '\0';
+
+    io::print("\n=== Running ===\n%s\n", [io::str_arg(run_cmd)]);
+    let run_result: int = system(run_cmd);
+
+    if (run_result != 0) {
+        io::print_err("Run failed with exit code %d\n\n", [run_result]);
+    } else {
+        io::print("Run completed.\n\n", [io::NULL_FORMAT_ARG]);
+    }
+
+    if (needs_free == 1) free(full_path);
+    if (auto_entry != cast<*byte>(0)) free(auto_entry);
+    return run_result;
+}
+
+const handle_build -> fn (argc: int, argv: **byte) int {
+    // --- Load lumix.toml if present ---
+    let tcfg: TomlConfig = toml::parse_toml();
+    defer { toml::free_toml_config(&tcfg); }
+
+    if (tcfg.found == 1) {
+        io::print("lumix.toml found — using config file.\n", [io::NULL_FORMAT_ARG]);
+    }
+
+    // --- Resolve entry point ---
+    let auto_entry: *byte = cast<*byte>(0);
+    let entry_point: *byte;
+
+    if (tcfg.entry != cast<*byte>(0)) {
+        entry_point = tcfg.entry;
+    } else {
+        auto_entry = find_entry_point(".");
+        if (auto_entry != cast<*byte>(0)) {
+            entry_point = auto_entry;
+        } else {
+            io::print("No entry point auto-detected.\n", [io::NULL_FORMAT_ARG]);
+            let entry_buffer: [byte; 256];
+            entry_point = ui::get_user_input(
+                "Entry point file (press Enter for 'main.lx'): ",
+                "main.lx",
+                cast<*byte>(&entry_buffer),
+                256
+            );
+            auto_entry = cast<*byte>(0);
+        }
+    }
+
+    // --- Resolve output name ---
+    let output_name: *byte;
+    if (argv[2] != cast<*byte>(0)) {
+        output_name = argv[2];
+    } elif (tcfg.name != cast<*byte>(0)) {
+        output_name = tcfg.name;
+    } else {
+        io::print("No output name provided. Supply one after 'build' or set 'name' in lumix.toml.\n",
+                  [io::NULL_FORMAT_ARG]);
+        if (auto_entry != cast<*byte>(0)) free(auto_entry);
+        return 1;
+    }
+
+    // --- Resolve optimisation level ---
+    let level: int = 0;
+    if (tcfg.optimize >= 0) level = tcfg.optimize;
+
+    if (argv[3] != cast<*byte>(0)) {
+        let optimize: *byte = argv[3];
+        let len_argv3: int = string::strlen(optimize);
+        loop [i: int = 0](i < len_argv3) : (++i) {
+            if (optimize[i] == '-' && optimize[i + 1] == 'O') {
+                let buf: *byte = cast<*byte>(alloc(2));
+                defer { free(buf); }
+                i = i + 2;
+                buf[0] = optimize[i];
+                buf[1] = '\0';
+                level = string::atio(buf);
+            }
+        }
+    }
+
+    // --- Resolve debug symbols ---
+    let dbg: int = 1;
+    if (tcfg.debug >= 0) dbg = tcfg.debug;
+
+    // --- Resolve scan directory ---
+    let scan_dir: *byte = ".";
+    if (tcfg.directory != cast<*byte>(0)) {
+        scan_dir = tcfg.directory;
+    }
+
+    // --- Resolve binary_dir ---
+    let binary_dir: *byte = cast<*byte>(0);
+    if (tcfg.binary_dir != cast<*byte>(0)) {
+        binary_dir = tcfg.binary_dir;
+    }
+
+    // --- Resolve run_args ---
+    let run_args: *byte = cast<*byte>(0);
+    if (tcfg.run_args != cast<*byte>(0)) {
+        run_args = tcfg.run_args;
+    }
+
+    // --- Resolve build flags ---
+    let build_flags: *byte = cast<*byte>(0);
+    if (tcfg.build_flags != cast<*byte>(0)) {
+        build_flags = tcfg.build_flags;
+    }
+
+    let config: BuildConfig = BuildConfig {
+        entry_point:   entry_point,
+        output_name:   output_name,
+        stdlib_path:   "std",
+        scan_path:     scan_dir,
+        binary_dir:    binary_dir,
+        run_args:      run_args,
+        build_flags:   build_flags,
+        optimize:      level,
+        debug_symbols: dbg,
+        verbose:       1
+    };
+
+    let result: int = build(&config);
+    if (auto_entry != cast<*byte>(0)) free(auto_entry);
+    return result;
 }
 
 pub const main -> fn (argc: int, argv: **byte) int {
     let cmd: *byte = argv[1];
-    if (cmd == cast<*byte>(0)) cmd = "unknown";
-
-    if (string::strcmp(cmd, "build") == 0) {
-        // --- Load lumix.toml if present ---
-        let tcfg: TomlConfig = toml::parse_toml();
-        defer { toml::free_toml_config(&tcfg); }
-
-        if (tcfg.found == 1) {
-            io::print("lumix.toml found — using config file.\n", [io::NULL_FORMAT_ARG]);
-        }
-
-        // --- Resolve entry point ---
-        // Priority: toml entry > auto-detect > manual prompt
-        let auto_entry: *byte = cast<*byte>(0);
-        let entry_point: *byte;
-
-        if (tcfg.entry != cast<*byte>(0)) {
-            entry_point = tcfg.entry;
-            tcfg.entry = cast<*byte>(0);
-        } else {
-            auto_entry = find_entry_point(".");
-            if (auto_entry != cast<*byte>(0)) {
-                entry_point = auto_entry;
-            } else {
-                io::print("No entry point auto-detected.\n", [io::NULL_FORMAT_ARG]);
-                let entry_buffer: [byte; 256];
-                entry_point = ui::get_user_input(
-                    "Entry point file (press Enter for 'main.lx'): ",
-                    "main.lx",
-                    cast<*byte>(&entry_buffer),
-                    256
-                );
-                auto_entry = cast<*byte>(0);
-            }
-        }
-
-        // --- Resolve output name ---
-        // Priority: argv[2] > toml name > error
-        let output_name: *byte;
-        if (argv[2] != cast<*byte>(0)) {
-            output_name = argv[2];
-        } elif (tcfg.name != cast<*byte>(0)) {
-            output_name = tcfg.name;
-            tcfg.name = cast<*byte>(0);
-        } else {
-            io::print("No output name provided. Supply one after 'build' or set 'name' in lumix.toml.\n",
-                      [io::NULL_FORMAT_ARG]);
-            if (auto_entry != cast<*byte>(0)) free(auto_entry);
-            return 1;
-        }
-
-        // --- Resolve optimisation level ---
-        // Priority: argv[3] -O flag > toml optimize > 0
-        let level: int = 0;
-        if (tcfg.optimize >= 0) level = tcfg.optimize;
-
-        if (argv[3] != cast<*byte>(0)) {
-            let optimize: *byte = argv[3];
-            let len_argv3: int = string::strlen(optimize);
-            loop [i: int = 0](i < len_argv3) : (++i) {
-                if (optimize[i] == '-' && optimize[i + 1] == 'O') {
-                    let buf: *byte = cast<*byte>(alloc(2));
-                    defer { free(buf); }
-                    i = i + 2;
-                    buf[0] = optimize[i];
-                    buf[1] = '\0';
-                    level = string::atio(buf);
-                }
-            }
-        }
-
-        // --- Resolve debug symbols ---
-        // Priority: toml debug > default on
-        let dbg: int = 1;
-        if (tcfg.debug >= 0) dbg = tcfg.debug;
-
-        // --- Resolve scan directory ---
-        // Priority: toml directory > "."
-        let scan_dir: *byte = ".";
-        if (tcfg.directory != cast<*byte>(0)) {
-            scan_dir = tcfg.directory;
-            tcfg.directory = cast<*byte>(0);
-        }
-
-        // --- Resolve binary_dir ---
-        let binary_dir: *byte = cast<*byte>(0);
-        if (tcfg.binary_dir != cast<*byte>(0)) {
-            binary_dir = tcfg.binary_dir;
-            tcfg.binary_dir = cast<*byte>(0);
-        }
-
-        // --- Resolve run_args ---
-        let run_args: *byte = cast<*byte>(0);
-        if (tcfg.run_args != cast<*byte>(0)) {
-            run_args = tcfg.run_args;
-            tcfg.run_args = cast<*byte>(0);
-        }
-
-        // --- Resolve build flags ---
-        let build_flags: *byte = cast<*byte>(0);
-        if (tcfg.build_flags != cast<*byte>(0)) {
-            build_flags = tcfg.build_flags;
-            tcfg.build_flags = cast<*byte>(0);
-        }
-
-        let config: BuildConfig = BuildConfig {
-            entry_point:   entry_point,
-            output_name:   output_name,
-            stdlib_path:   "std",
-            scan_path:     scan_dir,
-            binary_dir:    binary_dir,
-            run_args:      run_args,
-            build_flags:   build_flags,
-            optimize:      level,
-            debug_symbols: dbg,
-            verbose:       1
-        };
-
-        let result: int = build(&config);
-        if (auto_entry != cast<*byte>(0)) free(auto_entry);
-        return result;
-    } elif (string::strcmp(cmd, "clean") == 0) {
-        return clean();
-    } elif (string::strcmp(cmd, "deps") == 0) {
-        return show_deps();
-    } elif (string::strcmp(cmd, "version") == 0) {
-        io::print("Luma Build System v1.10", [io::NULL_FORMAT_ARG]);
-    } else {
-        io::print("\nUnknown command: %s
-Usage:
-    clean   - Clean build artifacts
-    deps    - Show dependency tree
-    version - Show the current version of lumix
-
-    build <output> - Build the project\n",
-        [io::str_arg(cmd)]);
+    if (cmd == cast<*byte>(0)) {
+        io::print("Usage:\n  init              Scaffold a new lumix.toml\n  config            Show resolved configuration\n  build [<name>]    Build the project\n  run               Build and execute the project\n  clean             Remove build artifacts\n  deps              Show dependency tree\n  version           Show version\n",
+        [io::NULL_FORMAT_ARG]);
         return 1;
     }
 
-    return 0;
+    if (string::strcmp(cmd, "build") == 0) {
+        return handle_build(argc, argv);
+    }
+    if (string::strcmp(cmd, "clean") == 0) {
+        return clean();
+    }
+    if (string::strcmp(cmd, "deps") == 0) {
+        return show_deps();
+    }
+    if (string::strcmp(cmd, "version") == 0) {
+        io::print("Luma Build System v1.11\n", [io::NULL_FORMAT_ARG]);
+        return 0;
+    }
+    if (string::strcmp(cmd, "init") == 0) {
+        return init_project();
+    }
+    if (string::strcmp(cmd, "config") == 0) {
+        return show_config();
+    }
+    if (string::strcmp(cmd, "run") == 0) {
+        return run_binary();
+    }
+
+    io::print("\nUnknown command: %s\nUsage:\n  init              Scaffold a new lumix.toml\n  config            Show resolved configuration\n  build [<name>]    Build the project\n  run               Build and execute the project\n  clean             Remove build artifacts\n  deps              Show dependency tree\n  version           Show version\n",
+    [io::str_arg(cmd)]);
+    return 1;
 }

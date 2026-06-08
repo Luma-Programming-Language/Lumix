@@ -102,6 +102,6 @@ echo   build - Build your Luma project
 echo   clean - Remove build artifacts
 echo   deps  - Show dependency tree
 echo.
-echo For more information, see DOCS.md
+echo For more information, see docs\README.md
 echo.
 pause

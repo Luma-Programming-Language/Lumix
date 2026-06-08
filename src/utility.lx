@@ -58,11 +58,10 @@ pub const contains_main_function -> fn (filepath: *byte) int {
     let content: *byte = io::read_file(filepath);
     if (content == cast<*byte>(0)) return 0;
 
-    defer { free(content); }
-
     let len: int = string::strlen(content);
     let pattern: *byte = "pub const main -> fn";
     let pattern_len: int = string::strlen(pattern);
+    let found: int = 0;
 
     let i: int = 0;
     loop (i < len - pattern_len) {
@@ -74,9 +73,13 @@ pub const contains_main_function -> fn (filepath: *byte) int {
             }
         }
 
-        if (matches == 1) return 1;
+        if (matches == 1) {
+            found = 1;
+            break;
+        }
         ++i;
     }
 
-    return 0;
+    free(content);
+    return found;
 }

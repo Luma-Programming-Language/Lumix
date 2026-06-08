@@ -1,6 +1,6 @@
 # Lumix Build System
 
-**Version:** 1.9  
+**Version:** 1.10  
 **Language:** Luma
 
 ## Overview
@@ -40,7 +40,10 @@ This creates the `lumix` executable at `bin/lumix`.
 |---------|-------------|
 | `build [output_name]` | Compile your project |
 | `clean` | Remove build artifacts |
+| `config` | Show resolved TOML configuration |
 | `deps` | Show dependency tree |
+| `init` | Scaffold a new `lumix.toml` |
+| `run` | Build and execute the project binary |
 | `version` | Print the current Lumix version |
 
 ---
@@ -127,7 +130,64 @@ Module dependencies:
 ./lumix version
 ```
 
-Prints the current Lumix version string (e.g. `Luma Build System v1.9`).
+Prints the current Lumix version string (e.g. `Luma Build System v1.10`).
+
+---
+
+### Init Command
+
+```
+./lumix init
+```
+
+Scaffolds a new `lumix.toml` in the current directory. If one already exists, prompts for confirmation before overwriting.
+
+---
+
+### Config Command
+
+```
+./lumix config
+```
+
+Parses and displays the resolved configuration from `lumix.toml`, including all sections and auto-detected values (such as the entry point file).
+
+**Example output:**
+
+```
+=== Configuration ===
+Config file: lumix.toml
+
+[project]
+  name      = "lumix"
+  entry     = "src/lumix.lx"
+  directory = "src"
+
+[build]
+  flags     = "-O3"
+
+[output]
+  binary_dir = "bin"
+
+[dependencies]
+  paths     = (none)
+
+[run]
+  args      = (none)
+
+--- Auto-Detected ---
+  entry     = "src/utility.lx"
+```
+
+---
+
+### Run Command
+
+```
+./lumix run
+```
+
+Builds the project and then executes the resulting binary. Uses the same configuration resolution as `build`. If `binary_dir` is set in `lumix.toml`, the binary is launched from that directory. Any arguments specified in the `[run] args` field are passed to the binary at execution time.
 
 ---
 
@@ -154,6 +214,9 @@ flags = "--no-sanitize -O3"
 
 [output]
 binary_dir = "bin"
+
+[run]
+args = "--debug --port 8080"
 ```
 
 ### Sections and Fields
@@ -183,6 +246,12 @@ binary_dir = "bin"
 |-------|------|-------------|---------|
 | `binary_dir` | string | Directory to place the compiled binary in | *(none — binary placed in current dir)* |
 
+#### `[run]`
+
+| Field | Type | Description | Default |
+|-------|------|-------------|---------|
+| `args` | string | Arguments passed to the binary when using `run` | *(none)* |
+
 ### Priority Rules
 
 When both `lumix.toml` and command-line arguments are present, the following priority order applies:
@@ -193,6 +262,7 @@ When both `lumix.toml` and command-line arguments are present, the following pri
 - **Binary directory:** `[output] binary_dir` > current directory
 - **Build flags:** `[build] flags` > *(none)*
 - **Dependency paths:** `[dependencies] paths` — appended as extra source files; directories expanded to all `.lx` files
+- **Run arguments:** `[run] args` — passed to the binary when executing `run`
 
 ### Comments
 
@@ -302,7 +372,6 @@ The dependency graph is stored in module-level global arrays:
 - `g_file_paths` — Full paths to source files
 - `g_dependencies` — Dependency lists per file (from `@use` directives)
 - `g_dep_counts` — Number of dependencies per file
-- `g_visited` / `g_in_stack` — Reserved for future cycle detection
 - `g_graph_size` — Number of files in the graph
 
 ---
@@ -311,7 +380,7 @@ The dependency graph is stored in module-level global arrays:
 
 - **Maximum 500 files** per project (`fs::MAX_FILES`)
 - **Maximum 200 dependencies** per file (`parser::MAX_DEPS`)
-- **No circular dependency detection** (infrastructure exists but is unused)
+- **No circular dependency detection**
 - **Unix only** — `getch` and file discovery use `stty`/`find`/`system()` calls
 - **Local files only** — no remote package management
 
@@ -338,4 +407,7 @@ Ensure all imported modules exist as `.lx` files in the scan path, and that the 
 
 ## Future Enhancements
 
-See `TODO.md` for planned features and improvements.
+- Incremental builds (only recompile changed files)
+- Parallel compilation
+- Cross-platform support (Windows/macOS)
+- Circular dependency detection

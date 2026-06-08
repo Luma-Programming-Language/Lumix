@@ -70,6 +70,21 @@ const read_quoted -> fn (src: *byte, i: int, dest: *byte, max: int) int {
     return i;
 }
 
+/// Read an unquoted value (until newline or comment).
+const read_unquoted -> fn (src: *byte, i: int, dest: *byte, max: int) int {
+    let n: int = 0;
+    loop (src[i] != '\n' && src[i] != '\0' && src[i] != '#' && n < max - 1) {
+        dest[n] = src[i];
+        n = n + 1;
+        i = i + 1;
+    }
+    loop (n > 0 && (dest[n-1] == ' ' || dest[n-1] == '\t')) {
+        n = n - 1;
+    }
+    dest[n] = '\0';
+    return i;
+}
+
 /// Read an integer value from src at position i.
 const read_int -> fn (src: *byte, i: int, out_val: *int) int {
     let buf: [byte; 32];
@@ -81,24 +96,6 @@ const read_int -> fn (src: *byte, i: int, out_val: *int) int {
     }
     buf[n] = '\0';
     *out_val = string::atio(cast<*byte>(&buf));
-    return i;
-}
-
-/// Read a boolean value (true/false) from src at position i.
-const read_bool -> fn (src: *byte, i: int, out_val: *int) int {
-    let buf: [byte; 8];
-    let n: int = 0;
-    loop ((src[i] >= 'a' && src[i] <= 'z') && n < 7) {
-        buf[n] = src[i];
-        n = n + 1;
-        i = i + 1;
-    }
-    buf[n] = '\0';
-    if (string::strcmp(cast<*byte>(&buf), "true") == 0) {
-        *out_val = 1;
-    } else {
-        *out_val = 0;
-    }
     return i;
 }
 
@@ -137,6 +134,7 @@ pub const parse_toml -> fn () TomlConfig {
     let in_dependency: int = 0;
     let in_output:  int = 0;
     let in_build:   int = 0;
+    let in_run:     int = 0;
 
     g_dep_count = 0;
 
@@ -167,11 +165,13 @@ pub const parse_toml -> fn () TomlConfig {
             in_dependency = 0;
             in_output  = 0;
             in_build   = 0;
+            in_run     = 0;
 
             if (string::strcmp(cast<*byte>(&key_buf), "project")  == 0) in_project = 1;
             elif (string::strcmp(cast<*byte>(&key_buf), "dependencies") == 0) in_dependency = 1;
             elif (string::strcmp(cast<*byte>(&key_buf), "output") == 0) in_output  = 1;
             elif (string::strcmp(cast<*byte>(&key_buf), "build")  == 0) in_build   = 1;
+            elif (string::strcmp(cast<*byte>(&key_buf), "run")  == 0) in_run   = 1;
 
             i = skip_line(src, i);
             continue;
@@ -193,18 +193,27 @@ pub const parse_toml -> fn () TomlConfig {
                     i = i + 1;
                     i = read_quoted(src, i, cast<*byte>(&val_buf), 256);
                     cfg.name = heap_dup(cast<*byte>(&val_buf));
+                } else {
+                    i = read_unquoted(src, i, cast<*byte>(&val_buf), 256);
+                    if (val_buf[0] != '\0') cfg.name = heap_dup(cast<*byte>(&val_buf));
                 }
             } elif (string::strcmp(cast<*byte>(&key_buf), "entry") == 0) {
                 if (src[i] == '"') {
                     i = i + 1;
                     i = read_quoted(src, i, cast<*byte>(&val_buf), 256);
                     cfg.entry = heap_dup(cast<*byte>(&val_buf));
+                } else {
+                    i = read_unquoted(src, i, cast<*byte>(&val_buf), 256);
+                    if (val_buf[0] != '\0') cfg.entry = heap_dup(cast<*byte>(&val_buf));
                 }
             } elif (string::strcmp(cast<*byte>(&key_buf), "directory") == 0) {
                 if (src[i] == '"') {
                     i = i + 1;
                     i = read_quoted(src, i, cast<*byte>(&val_buf), 256);
                     cfg.directory = heap_dup(cast<*byte>(&val_buf));
+                } else {
+                    i = read_unquoted(src, i, cast<*byte>(&val_buf), 256);
+                    if (val_buf[0] != '\0') cfg.directory = heap_dup(cast<*byte>(&val_buf));
                 }
             }
         }
@@ -255,6 +264,9 @@ pub const parse_toml -> fn () TomlConfig {
                     i = i + 1;
                     i = read_quoted(src, i, cast<*byte>(&val_buf), 256);
                     cfg.binary_dir = heap_dup(cast<*byte>(&val_buf));
+                } else {
+                    i = read_unquoted(src, i, cast<*byte>(&val_buf), 256);
+                    if (val_buf[0] != '\0') cfg.binary_dir = heap_dup(cast<*byte>(&val_buf));
                 }
             }
         }
@@ -265,6 +277,22 @@ pub const parse_toml -> fn () TomlConfig {
                     i = i + 1;
                     i = read_quoted(src, i, cast<*byte>(&val_buf), 256);
                     cfg.build_flags = heap_dup(cast<*byte>(&val_buf));
+                } else {
+                    i = read_unquoted(src, i, cast<*byte>(&val_buf), 256);
+                    if (val_buf[0] != '\0') cfg.build_flags = heap_dup(cast<*byte>(&val_buf));
+                }
+            }
+        }
+
+        if (in_run == 1) {
+            if (string::strcmp(cast<*byte>(&key_buf), "args") == 0) {
+                if (src[i] == '"') {
+                    i = i + 1;
+                    i = read_quoted(src, i, cast<*byte>(&val_buf), 256);
+                    cfg.run_args = heap_dup(cast<*byte>(&val_buf));
+                } else {
+                    i = read_unquoted(src, i, cast<*byte>(&val_buf), 256);
+                    if (val_buf[0] != '\0') cfg.run_args = heap_dup(cast<*byte>(&val_buf));
                 }
             }
         }
@@ -282,6 +310,7 @@ pub const free_toml_config -> fn (cfg: *TomlConfig) void {
     if (cfg.directory   != cast<*byte>(0)) { free(cfg.directory);   cfg.directory   = cast<*byte>(0); }
     if (cfg.binary_dir  != cast<*byte>(0)) { free(cfg.binary_dir);  cfg.binary_dir  = cast<*byte>(0); }
     if (cfg.build_flags != cast<*byte>(0)) { free(cfg.build_flags); cfg.build_flags = cast<*byte>(0); }
+    if (cfg.run_args    != cast<*byte>(0)) { free(cfg.run_args);    cfg.run_args    = cast<*byte>(0); }
 }
 
 pub const get_dep_count -> fn () int {

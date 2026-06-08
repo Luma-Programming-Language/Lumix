@@ -3,33 +3,13 @@
 @use "std_string" as string
 @use "std_memory" as mem
 @use "parse" as parser
-@use "utility" as util
 @use "std_io" as io
 
-const TEMP_CWD_FILE: *byte = "/tmp/luma_cwd.txt";
 const TEMP_FILES_LIST: *byte = "/tmp/luma_files.txt";
 
-const MAX_PATH_LEN: int = 1024;
 const MAX_CMD_LEN: int = 512;
 
 pub const MAX_FILES: int = 500;
-
-#returns_ownership
-pub const get_cwd -> fn () *byte {
-    let cwd: *byte = cast<*byte>(alloc(MAX_PATH_LEN));
-    system("pwd > /tmp/luma_cwd.txt");
-    
-    let result: *byte = io::read_file(TEMP_CWD_FILE);
-    if (result != cast<*byte>(0)) {
-        util::strip_trailing_newline(result);
-        let len: int = string::strlen(result);
-        mem::memcpy(cast<*void>(cwd), cast<*void>(result), len);
-        free(result);
-    }
-    
-    system("rm -f /tmp/luma_cwd.txt");
-    return cwd;
-}
 
 const execute_find_command -> fn (path: *byte) void {
     let scan_cmd: *byte = cast<*byte>(alloc(MAX_CMD_LEN));
@@ -115,8 +95,9 @@ pub const scan_directory -> fn (path: *byte, out_count: *int) **byte {
     
     loop (file_list[i] != '\0' && *out_count < MAX_FILES) {
         if (file_list[i] == '\n') {
-            if (parser::parse_file_line(file_list, line_start, i) != cast<*byte>(0)) {
-                files[*out_count] = parser::parse_file_line(file_list, line_start, i);
+            let parsed: *byte = parser::parse_file_line(file_list, line_start, i);
+            if (parsed != cast<*byte>(0)) {
+                files[*out_count] = parsed;
                 *out_count = *out_count + 1;
             }
             line_start = i + 1;
@@ -125,8 +106,9 @@ pub const scan_directory -> fn (path: *byte, out_count: *int) **byte {
     }
     
     if (i > line_start && *out_count < MAX_FILES) {
-        if (parser::parse_file_line(file_list, line_start, i) != cast<*byte>(0)) {
-            files[*out_count] = parser::parse_file_line(file_list, line_start, i);
+        let parsed: *byte = parser::parse_file_line(file_list, line_start, i);
+        if (parsed != cast<*byte>(0)) {
+            files[*out_count] = parsed;
             *out_count = *out_count + 1;
         }
     }
