@@ -3,7 +3,7 @@
 @use "std_io" as io
 
 @os {
-    "windows" -> {
+    "windows64" -> {
         #dll_import("kernel32.dll", callconv: "stdcall")
         const GetStdHandle -> fn (nStdHandle: int) int;
         #dll_import("kernel32.dll", callconv: "stdcall")
@@ -22,7 +22,7 @@ pub const getch -> fn () byte {
     @os {
         "linux" -> { __syscall__(0, 0, &c, 1); }
         "macos" -> { __syscall__(3, 0, &c, 1); }
-        "windows" -> {
+        "windows64" -> {
             let handle: int = GetStdHandle(-10);
             let bytes_read: int = 0;
             ReadFile(handle, cast<*void>(&c), 1, &bytes_read, cast<*void>(0));

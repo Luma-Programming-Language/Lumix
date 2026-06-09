@@ -14,7 +14,7 @@
         const TEMP_FILES_LIST: *byte = "/tmp/luma_files.txt";
         const NUL_DEVICE: *byte = "/dev/null";
     }
-    "windows" -> {
+    "windows64" -> {
         const TEMP_FILES_LIST: *byte = "luma_files.txt";
         const NUL_DEVICE: *byte = "nul";
     }
@@ -61,7 +61,7 @@ const execute_find_command -> fn (path: *byte) void {
             mem::memcpy(cast<*void>(&scan_cmd[i]), cast<*void>(suffix), suffix_len);
             i = i + suffix_len;
         }
-        "windows" -> {
+        "windows64" -> {
             let dir_prefix: *byte = "dir /s /b ";
             let prefix_len: int = string::strlen(dir_prefix);
             mem::memcpy(cast<*void>(scan_cmd), cast<*void>(dir_prefix), prefix_len);
@@ -156,7 +156,7 @@ const fallback_ls_scan -> fn (path: *byte) void {
             cmd[i + s2_len] = '\0';
             system(cmd);
         }
-        "windows" -> {
+        "windows64" -> {
             // On Windows, the primary dir /s /b scan is sufficient;
             // this fallback is rarely needed. Try a simple dir as fallback.
             system("del /f /q luma_files.txt 2>nul 1>nul");
@@ -194,7 +194,7 @@ pub const scan_directory -> fn (path: *byte, out_count: *int) **byte {
     @os {
         "linux"   -> { system("rm -f /tmp/luma_files.txt 2>/dev/null"); }
         "macos"   -> { system("rm -f /tmp/luma_files.txt 2>/dev/null"); }
-        "windows" -> { system("del /f /q luma_files.txt 2>nul 1>nul"); }
+        "windows64" -> { system("del /f /q luma_files.txt 2>nul 1>nul"); }
     }
 
     execute_find_command(path);
@@ -236,7 +236,7 @@ pub const scan_directory -> fn (path: *byte, out_count: *int) **byte {
     @os {
         "linux"   -> { system("rm -f /tmp/luma_files.txt 2>/dev/null"); }
         "macos"   -> { system("rm -f /tmp/luma_files.txt 2>/dev/null"); }
-        "windows" -> { system("del /f /q luma_files.txt 2>nul 1>nul"); }
+        "windows64" -> { system("del /f /q luma_files.txt 2>nul 1>nul"); }
     }
 
     return files;

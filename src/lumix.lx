@@ -50,7 +50,7 @@ const join_path -> fn (dir: *byte, name: *byte, out: **byte) void {
     @os {
         "linux"   -> { full[dir_len] = '/'; }
         "macos"   -> { full[dir_len] = '/'; }
-        "windows" -> { full[dir_len] = '\\'; }
+        "windows64" -> { full[dir_len] = '\\'; }
     }
     mem::memcpy(cast<*void>(&full[dir_len + 1]), cast<*void>(name), name_len);
     full[dir_len + 1 + name_len] = '\0';
@@ -341,7 +341,7 @@ const clean -> fn () int {
     @os {
         "linux"   -> { system("rm -rf obj main /tmp/luma_*.txt"); }
         "macos"   -> { system("rm -rf obj main /tmp/luma_*.txt"); }
-        "windows" -> { system("del /f /q obj main luma_files.txt 2>nul"); }
+        "windows64" -> { system("del /f /q obj main luma_files.txt 2>nul"); }
     }
     io::print("Cleaned build artifacts successfully.\n\n", [io::NULL_FORMAT_ARG]);
     return 0;
@@ -395,7 +395,7 @@ const init_project -> fn () int {
         "macos" -> {
             system("cat > lumix.toml << 'EOF'\n[project]\nname = myapp\ndirectory = src\nentry = src/main.lx\n\n[build]\nflags = --no-sanitize -O3\n\n[output]\nbinary_dir = bin\nEOF");
         }
-        "windows" -> {
+        "windows64" -> {
             system("echo [project]> lumix.toml");
             system("echo name = myapp>> lumix.toml");
             system("echo directory = src>> lumix.toml");
