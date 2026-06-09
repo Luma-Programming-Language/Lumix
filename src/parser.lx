@@ -12,7 +12,13 @@ pub const parse_file_line -> fn (file_list: *byte, start: int, end: int) *byte {
     let line_len: int = end - start;
     if (line_len <= 0) return cast<*byte>(0);
 
-    return util::clean_dotslash_prefix(util::copy_string(file_list, start, line_len));
+    // Strip trailing CR for Windows CRLF line endings
+    let len: int = line_len;
+    if (len > 0 && file_list[end - 1] == '\r') {
+        len = len - 1;
+    }
+
+    return util::clean_dotslash_prefix(util::copy_string(file_list, start, len));
 }
 
 const skip_whitespace -> fn (content: *byte, pos: int, max_len: int) int {
