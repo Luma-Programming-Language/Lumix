@@ -71,8 +71,15 @@ const execute_find_command -> fn (path: *byte) void {
             mem::memcpy(cast<*void>(&scan_cmd[i]), cast<*void>(path), path_len);
             i = i + path_len;
 
-            // cmd.exe accepts / as path separator
-            let suffix: *byte = "/*.lx > ";
+            // Use '\\' char literal to build \*.lx suffix
+            let bs: byte = '\\';
+            scan_cmd[i] = bs; i = i + 1;
+            scan_cmd[i] = '*'; i = i + 1;
+            scan_cmd[i] = '.'; i = i + 1;
+            scan_cmd[i] = 'l'; i = i + 1;
+            scan_cmd[i] = 'x'; i = i + 1;
+
+            let suffix: *byte = " > ";
             let suffix_len: int = string::strlen(suffix);
             mem::memcpy(cast<*void>(&scan_cmd[i]), cast<*void>(suffix), suffix_len);
             i = i + suffix_len;
@@ -163,8 +170,14 @@ const fallback_ls_scan -> fn (path: *byte) void {
             i = prefix_len;
             mem::memcpy(cast<*void>(&cmd[i]), cast<*void>(path), path_len);
             i = i + path_len;
-            // cmd.exe accepts / as path separator
-            let suffix: *byte = "/*.lx > luma_files.txt";
+            // Use '\\' char literal to build \*.lx suffix
+            let bs: byte = '\\';
+            cmd[i] = bs; i = i + 1;
+            cmd[i] = '*'; i = i + 1;
+            cmd[i] = '.'; i = i + 1;
+            cmd[i] = 'l'; i = i + 1;
+            cmd[i] = 'x'; i = i + 1;
+            let suffix: *byte = " > luma_files.txt";
             let s_len: int = string::strlen(suffix);
             mem::memcpy(cast<*void>(&cmd[i]), cast<*void>(suffix), s_len);
             cmd[i + s_len] = '\0';
