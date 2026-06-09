@@ -8,14 +8,14 @@ pub const FILE_EXT_LEN: int = 3;
 const find_last_slash -> fn (filepath: *byte, len: int) int {
     let last_slash: int = -1;
     loop [i: int = 0](i < len) : (i = i + 1) {
-        if (filepath[i] == '/') last_slash = i;
+        if (filepath[i] == '/' || filepath[i] == '\\') last_slash = i;
     }
     return last_slash;
 }
 
 const starts_with_std -> fn (filepath: *byte) int {
     if (filepath[0] == 's' && filepath[1] == 't' &&
-        filepath[2] == 'd' && filepath[3] == '/') return 1;
+        filepath[2] == 'd' && (filepath[3] == '/' || filepath[3] == '\\')) return 1;
     return 0;
 }
 

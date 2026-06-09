@@ -3,7 +3,6 @@
 @use "std_string" as string
 @use "std_termfx" as term
 @use "std_memory" as mem
-@use "std_sys" as sys
 @use "std_io" as io
 
 @use "file_system" as fs
@@ -41,14 +40,18 @@ let g_graph_size: int = 0;
 let g_converted_paths: [*byte; 200];
 let g_converted_count: int = 0;
 
-/// Join dir and name with a '/' separator into a newly allocated string.
+/// Join dir and name with a platform-appropriate separator.
 #returns_ownership
 const join_path -> fn (dir: *byte, name: *byte, out: **byte) void {
     let dir_len: int = string::strlen(dir);
     let name_len: int = string::strlen(name);
     let full: *byte = cast<*byte>(alloc((dir_len + 1 + name_len + 1) * sizeof<byte>));
     mem::memcpy(cast<*void>(full), cast<*void>(dir), dir_len);
-    full[dir_len] = '/';
+    @os {
+        "linux"   -> { full[dir_len] = '/'; }
+        "macos"   -> { full[dir_len] = '/'; }
+        "windows" -> { full[dir_len] = '\\'; }
+    }
     mem::memcpy(cast<*void>(&full[dir_len + 1]), cast<*void>(name), name_len);
     full[dir_len + 1 + name_len] = '\0';
     *out = full;
@@ -335,7 +338,11 @@ const clean -> fn () int {
     }
 
     io::print("Cleaning...\n", [io::NULL_FORMAT_ARG]);
-    system("rm -rf obj main /tmp/luma_*.txt");
+    @os {
+        "linux"   -> { system("rm -rf obj main /tmp/luma_*.txt"); }
+        "macos"   -> { system("rm -rf obj main /tmp/luma_*.txt"); }
+        "windows" -> { system("del /f /q obj main luma_files.txt 2>nul"); }
+    }
     io::print("Cleaned build artifacts successfully.\n\n", [io::NULL_FORMAT_ARG]);
     return 0;
 }
@@ -381,7 +388,26 @@ const init_project -> fn () int {
     }
 
     io::print("Creating lumix.toml...\n", [io::NULL_FORMAT_ARG]);
-    system("cat > lumix.toml << 'EOF'\n[project]\nname = myapp\ndirectory = src\nentry = src/main.lx\n\n[build]\nflags = --no-sanitize -O3\n\n[output]\nbinary_dir = bin\nEOF");
+    @os {
+        "linux" -> {
+            system("cat > lumix.toml << 'EOF'\n[project]\nname = myapp\ndirectory = src\nentry = src/main.lx\n\n[build]\nflags = --no-sanitize -O3\n\n[output]\nbinary_dir = bin\nEOF");
+        }
+        "macos" -> {
+            system("cat > lumix.toml << 'EOF'\n[project]\nname = myapp\ndirectory = src\nentry = src/main.lx\n\n[build]\nflags = --no-sanitize -O3\n\n[output]\nbinary_dir = bin\nEOF");
+        }
+        "windows" -> {
+            system("echo [project]> lumix.toml");
+            system("echo name = myapp>> lumix.toml");
+            system("echo directory = src>> lumix.toml");
+            system("echo entry = src/main.lx>> lumix.toml");
+            system("echo.>> lumix.toml");
+            system("echo [build]>> lumix.toml");
+            system("echo flags = --no-sanitize -O3>> lumix.toml");
+            system("echo.>> lumix.toml");
+            system("echo [output]>> lumix.toml");
+            system("echo binary_dir = bin>> lumix.toml");
+        }
+    }
     io::print("Created lumix.toml. Edit it to configure your project.\n\n", [io::NULL_FORMAT_ARG]);
     return 0;
 }

@@ -5,7 +5,20 @@
 @use "parse" as parser
 @use "std_io" as io
 
-const TEMP_FILES_LIST: *byte = "/tmp/luma_files.txt";
+@os {
+    "linux" -> {
+        const TEMP_FILES_LIST: *byte = "/tmp/luma_files.txt";
+        const NUL_DEVICE: *byte = "/dev/null";
+    }
+    "macos" -> {
+        const TEMP_FILES_LIST: *byte = "/tmp/luma_files.txt";
+        const NUL_DEVICE: *byte = "/dev/null";
+    }
+    "windows" -> {
+        const TEMP_FILES_LIST: *byte = "luma_files.txt";
+        const NUL_DEVICE: *byte = "nul";
+    }
+}
 
 const MAX_CMD_LEN: int = 512;
 
@@ -17,58 +30,147 @@ const execute_find_command -> fn (path: *byte) void {
 
     let i: int = 0;
 
-    // "find "
-    let find_prefix: *byte = "find ";
-    let prefix_len: int = string::strlen(find_prefix);
-    mem::memcpy(cast<*void>(scan_cmd), cast<*void>(find_prefix), prefix_len);
-    i = prefix_len;
+    @os {
+        "linux" -> {
+            let find_prefix: *byte = "find ";
+            let prefix_len: int = string::strlen(find_prefix);
+            mem::memcpy(cast<*void>(scan_cmd), cast<*void>(find_prefix), prefix_len);
+            i = prefix_len;
 
-    // path
-    let path_len: int = string::strlen(path);
-    mem::memcpy(cast<*void>(&scan_cmd[i]), cast<*void>(path), path_len);
-    i = i + path_len;
+            let path_len: int = string::strlen(path);
+            mem::memcpy(cast<*void>(&scan_cmd[i]), cast<*void>(path), path_len);
+            i = i + path_len;
 
-    // " -name '*.lx' -type f 2>/dev/null > /tmp/luma_files.txt"
-    let suffix: *byte = " -name '*.lx' -type f 2>/dev/null > /tmp/luma_files.txt";
-    let suffix_len: int = string::strlen(suffix);
-    mem::memcpy(cast<*void>(&scan_cmd[i]), cast<*void>(suffix), suffix_len);
-    i = i + suffix_len;
+            let suffix: *byte = " -name '*.lx' -type f 2>/dev/null > ";
+            let suffix_len: int = string::strlen(suffix);
+            mem::memcpy(cast<*void>(&scan_cmd[i]), cast<*void>(suffix), suffix_len);
+            i = i + suffix_len;
+        }
+        "macos" -> {
+            let find_prefix: *byte = "find ";
+            let prefix_len: int = string::strlen(find_prefix);
+            mem::memcpy(cast<*void>(scan_cmd), cast<*void>(find_prefix), prefix_len);
+            i = prefix_len;
+
+            let path_len: int = string::strlen(path);
+            mem::memcpy(cast<*void>(&scan_cmd[i]), cast<*void>(path), path_len);
+            i = i + path_len;
+
+            let suffix: *byte = " -name '*.lx' -type f 2>/dev/null > ";
+            let suffix_len: int = string::strlen(suffix);
+            mem::memcpy(cast<*void>(&scan_cmd[i]), cast<*void>(suffix), suffix_len);
+            i = i + suffix_len;
+        }
+        "windows" -> {
+            let dir_prefix: *byte = "dir /s /b ";
+            let prefix_len: int = string::strlen(dir_prefix);
+            mem::memcpy(cast<*void>(scan_cmd), cast<*void>(dir_prefix), prefix_len);
+            i = prefix_len;
+
+            let path_len: int = string::strlen(path);
+            mem::memcpy(cast<*void>(&scan_cmd[i]), cast<*void>(path), path_len);
+            i = i + path_len;
+
+            // cmd.exe accepts / as path separator
+            let suffix: *byte = "/*.lx > ";
+            let suffix_len: int = string::strlen(suffix);
+            mem::memcpy(cast<*void>(&scan_cmd[i]), cast<*void>(suffix), suffix_len);
+            i = i + suffix_len;
+        }
+    }
+
+    let temp_len: int = string::strlen(TEMP_FILES_LIST);
+    mem::memcpy(cast<*void>(&scan_cmd[i]), cast<*void>(TEMP_FILES_LIST), temp_len);
+    i = i + temp_len;
 
     scan_cmd[i] = '\0';
     system(scan_cmd);
 }
 
 const fallback_ls_scan -> fn (path: *byte) void {
-    let cmd: *byte = cast<*byte>(alloc(MAX_CMD_LEN));
-    defer { free(cmd); }
+    @os {
+        "linux" -> {
+            let cmd: *byte = cast<*byte>(alloc(MAX_CMD_LEN));
+            defer { free(cmd); }
 
-    let path_len: int = string::strlen(path);
+            let path_len: int = string::strlen(path);
 
-    system("rm -f /tmp/luma_files.txt 2>/dev/null");
+            system("rm -f /tmp/luma_files.txt 2>/dev/null");
 
-    // ls <path>\*.lx
-    let i: int = 0;
-    let ls_prefix: *byte = "ls ";
-    let prefix_len: int = string::strlen(ls_prefix);
-    mem::memcpy(cast<*void>(cmd), cast<*void>(ls_prefix), prefix_len);
-    i = prefix_len;
-    mem::memcpy(cast<*void>(&cmd[i]), cast<*void>(path), path_len);
-    i = i + path_len;
-    let suffix1: *byte = "/*.lx 2>/dev/null > /tmp/luma_files.txt";
-    let s1_len: int = string::strlen(suffix1);
-    mem::memcpy(cast<*void>(&cmd[i]), cast<*void>(suffix1), s1_len);
-    cmd[i + s1_len] = '\0';
-    system(cmd);
+            let i: int = 0;
+            let ls_prefix: *byte = "ls ";
+            let prefix_len: int = string::strlen(ls_prefix);
+            mem::memcpy(cast<*void>(cmd), cast<*void>(ls_prefix), prefix_len);
+            i = prefix_len;
+            mem::memcpy(cast<*void>(&cmd[i]), cast<*void>(path), path_len);
+            i = i + path_len;
+            let suffix1: *byte = "/*.lx 2>/dev/null > /tmp/luma_files.txt";
+            let s1_len: int = string::strlen(suffix1);
+            mem::memcpy(cast<*void>(&cmd[i]), cast<*void>(suffix1), s1_len);
+            cmd[i + s1_len] = '\0';
+            system(cmd);
 
-    // ls <path>/*/*.lx
-    i = prefix_len;
-    mem::memcpy(cast<*void>(&cmd[i]), cast<*void>(path), path_len);
-    i = i + path_len;
-    let suffix2: *byte = "/*/*.lx 2>/dev/null >> /tmp/luma_files.txt";
-    let s2_len: int = string::strlen(suffix2);
-    mem::memcpy(cast<*void>(&cmd[i]), cast<*void>(suffix2), s2_len);
-    cmd[i + s2_len] = '\0';
-    system(cmd);
+            i = prefix_len;
+            mem::memcpy(cast<*void>(&cmd[i]), cast<*void>(path), path_len);
+            i = i + path_len;
+            let suffix2: *byte = "/*/*.lx 2>/dev/null >> /tmp/luma_files.txt";
+            let s2_len: int = string::strlen(suffix2);
+            mem::memcpy(cast<*void>(&cmd[i]), cast<*void>(suffix2), s2_len);
+            cmd[i + s2_len] = '\0';
+            system(cmd);
+        }
+        "macos" -> {
+            let cmd: *byte = cast<*byte>(alloc(MAX_CMD_LEN));
+            defer { free(cmd); }
+
+            let path_len: int = string::strlen(path);
+
+            system("rm -f /tmp/luma_files.txt 2>/dev/null");
+
+            let i: int = 0;
+            let ls_prefix: *byte = "ls ";
+            let prefix_len: int = string::strlen(ls_prefix);
+            mem::memcpy(cast<*void>(cmd), cast<*void>(ls_prefix), prefix_len);
+            i = prefix_len;
+            mem::memcpy(cast<*void>(&cmd[i]), cast<*void>(path), path_len);
+            i = i + path_len;
+            let suffix1: *byte = "/*.lx 2>/dev/null > /tmp/luma_files.txt";
+            let s1_len: int = string::strlen(suffix1);
+            mem::memcpy(cast<*void>(&cmd[i]), cast<*void>(suffix1), s1_len);
+            cmd[i + s1_len] = '\0';
+            system(cmd);
+
+            i = prefix_len;
+            mem::memcpy(cast<*void>(&cmd[i]), cast<*void>(path), path_len);
+            i = i + path_len;
+            let suffix2: *byte = "/*/*.lx 2>/dev/null >> /tmp/luma_files.txt";
+            let s2_len: int = string::strlen(suffix2);
+            mem::memcpy(cast<*void>(&cmd[i]), cast<*void>(suffix2), s2_len);
+            cmd[i + s2_len] = '\0';
+            system(cmd);
+        }
+        "windows" -> {
+            // On Windows, the primary dir /s /b scan is sufficient;
+            // this fallback is rarely needed. Try a simple dir as fallback.
+            system("del /f /q luma_files.txt 2>nul 1>nul");
+            let cmd: *byte = cast<*byte>(alloc(MAX_CMD_LEN));
+            defer { free(cmd); }
+            let path_len: int = string::strlen(path);
+            let i: int = 0;
+            let dir_prefix: *byte = "dir /b ";
+            let prefix_len: int = string::strlen(dir_prefix);
+            mem::memcpy(cast<*void>(cmd), cast<*void>(dir_prefix), prefix_len);
+            i = prefix_len;
+            mem::memcpy(cast<*void>(&cmd[i]), cast<*void>(path), path_len);
+            i = i + path_len;
+            // cmd.exe accepts / as path separator
+            let suffix: *byte = "/*.lx > luma_files.txt";
+            let s_len: int = string::strlen(suffix);
+            mem::memcpy(cast<*void>(&cmd[i]), cast<*void>(suffix), s_len);
+            cmd[i + s_len] = '\0';
+            system(cmd);
+        }
+    }
 }
 
 #returns_ownership
@@ -76,7 +178,12 @@ pub const scan_directory -> fn (path: *byte, out_count: *int) **byte {
     let files: **byte = cast<**byte>(alloc(MAX_FILES * sizeof<*byte>));
     *out_count = 0;
 
-    system("rm -f /tmp/luma_files.txt 2>/dev/null");
+    @os {
+        "linux"   -> { system("rm -f /tmp/luma_files.txt 2>/dev/null"); }
+        "macos"   -> { system("rm -f /tmp/luma_files.txt 2>/dev/null"); }
+        "windows" -> { system("del /f /q luma_files.txt 2>nul 1>nul"); }
+    }
+
     execute_find_command(path);
 
     let file_list: *byte = io::read_file(TEMP_FILES_LIST);
@@ -113,6 +220,11 @@ pub const scan_directory -> fn (path: *byte, out_count: *int) **byte {
         }
     }
 
-    system("rm -f /tmp/luma_files.txt 2>/dev/null");
+    @os {
+        "linux"   -> { system("rm -f /tmp/luma_files.txt 2>/dev/null"); }
+        "macos"   -> { system("rm -f /tmp/luma_files.txt 2>/dev/null"); }
+        "windows" -> { system("del /f /q luma_files.txt 2>nul 1>nul"); }
+    }
+
     return files;
 }
