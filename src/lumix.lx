@@ -390,22 +390,40 @@ const init_project -> fn () int {
     io::print("Creating lumix.toml...\n", [io::NULL_FORMAT_ARG]);
     @os {
         "linux" -> {
-            system("cat > lumix.toml << 'EOF'\n[project]\nname = myapp\ndirectory = src\nentry = src/main.lx\n\n[build]\nflags = --no-sanitize -O3\n\n[output]\nbinary_dir = bin\nEOF");
+            system("echo '[project]' > lumix.toml");
+            system("echo 'name      = \"myapp\"' >> lumix.toml");
+            system("echo 'directory = \"src\"' >> lumix.toml");
+            system("echo 'entry     = \"src/main.lx\"' >> lumix.toml");
+            system("echo '' >> lumix.toml");
+            system("echo '[build]' >> lumix.toml");
+            system("echo 'flags = \"--no-sanitize -O3\"' >> lumix.toml");
+            system("echo '' >> lumix.toml");
+            system("echo '[output]' >> lumix.toml");
+            system("echo 'binary_dir = \"bin\"' >> lumix.toml");
         }
         "macos" -> {
-            system("cat > lumix.toml << 'EOF'\n[project]\nname = myapp\ndirectory = src\nentry = src/main.lx\n\n[build]\nflags = --no-sanitize -O3\n\n[output]\nbinary_dir = bin\nEOF");
+            system("echo '[project]' > lumix.toml");
+            system("echo 'name      = \"myapp\"' >> lumix.toml");
+            system("echo 'directory = \"src\"' >> lumix.toml");
+            system("echo 'entry     = \"src/main.lx\"' >> lumix.toml");
+            system("echo '' >> lumix.toml");
+            system("echo '[build]' >> lumix.toml");
+            system("echo 'flags = \"--no-sanitize -O3\"' >> lumix.toml");
+            system("echo '' >> lumix.toml");
+            system("echo '[output]' >> lumix.toml");
+            system("echo 'binary_dir = \"bin\"' >> lumix.toml");
         }
         "windows64" -> {
             system("echo [project]> lumix.toml");
-            system("echo name = myapp>> lumix.toml");
-            system("echo directory = src>> lumix.toml");
-            system("echo entry = src/main.lx>> lumix.toml");
+            system("echo name      = \"myapp\">> lumix.toml");
+            system("echo directory = \"src\">> lumix.toml");
+            system("echo entry     = \"src/main.lx\">> lumix.toml");
             system("echo.>> lumix.toml");
             system("echo [build]>> lumix.toml");
-            system("echo flags = --no-sanitize -O3>> lumix.toml");
+            system("echo flags = \"--no-sanitize -O3\">> lumix.toml");
             system("echo.>> lumix.toml");
             system("echo [output]>> lumix.toml");
-            system("echo binary_dir = bin>> lumix.toml");
+            system("echo binary_dir = \"bin\">> lumix.toml");
         }
     }
     io::print("Created lumix.toml. Edit it to configure your project.\n\n", [io::NULL_FORMAT_ARG]);
