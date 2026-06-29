@@ -1,6 +1,6 @@
 @module "file_system"
 
-@use "std_string" as string
+@use "std_cstring" as string
 @use "std_memory" as mem
 @use "parse" as parser
 @use "std_io" as io

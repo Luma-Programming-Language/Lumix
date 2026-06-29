@@ -1,6 +1,6 @@
 @module "utility"
 
-@use "std_string" as string
+@use "std_cstring" as string
 @use "std_memory" as mem
 @use "std_io" as io
 
