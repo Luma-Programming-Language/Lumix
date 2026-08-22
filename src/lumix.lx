@@ -30,6 +30,37 @@ const BuildConfig -> struct {
 
 const NULL_BYTE: Slice = Slice { ptr: "", len: 0 };
 const STD_PREFIX_LEN: int = 4;
+const MAX_TEST_FILES: int = 500;
+
+@os {
+    "linux" -> {
+        const TEST_BIN_PATH:    *byte = "/tmp/lumix_test_bin";
+        const TEST_OUT_PATH:    *byte = "/tmp/lumix_test_out.txt";
+        const TEST_RM_CMD:      *byte = "rm -f /tmp/lumix_test_bin /tmp/lumix_test_out.txt";
+        const TEST_SILENCE:     *byte = " > /dev/null 2>&1";
+        const TEST_CAPTURE:     *byte = " > /tmp/lumix_test_out.txt 2>&1";
+        const TEST_SHOW_OUT:    *byte = "cat /tmp/lumix_test_out.txt";
+        const TEST_CLEAN_PREFIX: *byte = "rm -rf obj > /dev/null 2>&1 && ";
+    }
+    "macos" -> {
+        const TEST_BIN_PATH:    *byte = "/tmp/lumix_test_bin";
+        const TEST_OUT_PATH:    *byte = "/tmp/lumix_test_out.txt";
+        const TEST_RM_CMD:      *byte = "rm -f /tmp/lumix_test_bin /tmp/lumix_test_out.txt";
+        const TEST_SILENCE:     *byte = " > /dev/null 2>&1";
+        const TEST_CAPTURE:     *byte = " > /tmp/lumix_test_out.txt 2>&1";
+        const TEST_SHOW_OUT:    *byte = "cat /tmp/lumix_test_out.txt";
+        const TEST_CLEAN_PREFIX: *byte = "rm -rf obj > /dev/null 2>&1 && ";
+    }
+    "windows64" -> {
+        const TEST_BIN_PATH:    *byte = "lumix_test_bin.exe";
+        const TEST_OUT_PATH:    *byte = "lumix_test_out.txt";
+        const TEST_RM_CMD:      *byte = "del /f /q lumix_test_bin.exe lumix_test_out.txt 2>nul";
+        const TEST_SILENCE:     *byte = " > nul 2>&1";
+        const TEST_CAPTURE:     *byte = " > lumix_test_out.txt 2>&1";
+        const TEST_SHOW_OUT:    *byte = "type lumix_test_out.txt";
+        const TEST_CLEAN_PREFIX: *byte = "rmdir /s /q obj 2>nul & ";
+    }
+}
 
 let g_dependencies: [**byte; 100];
 let g_module_names: [*byte; 100];
@@ -468,6 +499,30 @@ const show_config -> fn () int {
     io::print("\n[run]\n", [io::NULL_FORMAT_ARG]);
     print_field("args", tcfg.run_args, "(none)");
 
+    io::print("\n[test]\n", [io::NULL_FORMAT_ARG]);
+
+    let test_valid_n: int = toml::get_test_valid_count();
+    io::print("  valid     = ", [io::NULL_FORMAT_ARG]);
+    if (test_valid_n > 0) {
+        io::print("\n", [io::NULL_FORMAT_ARG]);
+        loop [i: int = 0](i < test_valid_n) : (i = i + 1) {
+            io::print("    - %c%s%c\n", [io::byte_arg('"'), io::str_arg(toml::get_test_valid_path(i)), io::byte_arg('"')]);
+        }
+    } else {
+        io::print("(none)\n", [io::NULL_FORMAT_ARG]);
+    }
+
+    let test_error_n: int = toml::get_test_error_count();
+    io::print("  errors    = ", [io::NULL_FORMAT_ARG]);
+    if (test_error_n > 0) {
+        io::print("\n", [io::NULL_FORMAT_ARG]);
+        loop [i: int = 0](i < test_error_n) : (i = i + 1) {
+            io::print("    - %c%s%c\n", [io::byte_arg('"'), io::str_arg(toml::get_test_error_path(i)), io::byte_arg('"')]);
+        }
+    } else {
+        io::print("(none)\n", [io::NULL_FORMAT_ARG]);
+    }
+
     io::print("\n--- Auto-Detected ---\n", [io::NULL_FORMAT_ARG]);
     let auto_entry: *byte = find_entry_point(".");
     if (auto_entry != cast<*byte>(0)) {
@@ -582,6 +637,254 @@ const run_binary -> fn () int {
     return run_result;
 }
 
+/// Build the luma command that compiles a single test file into TEST_BIN_PATH.
+/// Stale objects in ./obj are wiped first (each test is standalone, so a
+/// leftover main symbol would break linking), and the file's own std_*
+/// imports are passed via -l so they resolve from any directory.
+/// When silent is 1 all compiler output is discarded; otherwise it is
+/// captured to TEST_OUT_PATH so failures can show it.
+#returns_ownership
+const make_compile_cmd -> fn (test_path: *byte, silent: int) String {
+    let slice: *Slice = cast<*Slice>(alloc(64 * sizeof<Slice>));
+    defer { free(slice); }
+
+    let n: int = 0;
+    slice[n++] = slice.null_terminated_slice(TEST_CLEAN_PREFIX);
+    slice[n++] = slice.null_terminated_slice("luma ");
+    slice[n++] = slice.null_terminated_slice(test_path);
+
+    // Collect the test file's std dependencies for -l.
+    let convs: **byte = cast<**byte>(alloc(32 * sizeof<*byte>));
+    defer { free(convs); }
+    let conv_n: int = 0;
+
+    let dep_count: int = 0;
+    let deps: **byte = parser::find_imports(test_path, &dep_count);
+    defer {
+        loop [i: int = 0](i < dep_count) : (i = i + 1) {
+            free(deps[i]);
+        }
+        free(deps);
+    }
+
+    loop [i: int = 0](i < dep_count && n < 58) : (i = i + 1) {
+        if (string::strncmp(deps[i], "std_", STD_PREFIX_LEN) != 0) continue;
+
+        let std_path: *byte = convert_std_module_path(deps[i]);
+
+        // Skip duplicates.
+        let dup: int = 0;
+        loop [j: int = 0](j < conv_n) : (j = j + 1) {
+            if (string::strcmp(convs[j], std_path) == 0) dup = 1;
+        }
+        if (dup == 1) {
+            free(std_path);
+            continue;
+        }
+
+        slice[n++] = slice.null_terminated_slice(" -l ");
+        slice[n++] = slice.null_terminated_slice(std_path);
+
+        if (conv_n < 32) {
+            convs[conv_n] = std_path;
+            conv_n = conv_n + 1;
+        } else {
+            free(std_path);
+        }
+    }
+
+    slice[n++] = slice.null_terminated_slice(" --no-sanitize -O0 -name ");
+    slice[n++] = slice.null_terminated_slice(TEST_BIN_PATH);
+
+    if (silent == 1) {
+        slice[n++] = slice.null_terminated_slice(TEST_SILENCE);
+    } else {
+        slice[n++] = slice.null_terminated_slice(TEST_CAPTURE);
+    }
+    slice[n] = NULL_BYTE;
+    let cmd_str: String;
+    cmd_str = cmd_str.concat_strs(slice, n);
+
+    loop [i: int = 0](i < conv_n) : (i = i + 1) {
+        free(convs[i]);
+    }
+
+    return cmd_str;
+}
+
+/// Execute the compiled test binary with its output captured to TEST_OUT_PATH.
+const run_test_binary -> fn () int {
+    let bin_len: int = string::strlen(TEST_BIN_PATH);
+    let cap_len: int = string::strlen(TEST_CAPTURE);
+
+    let cmd: *byte = cast<*byte>(alloc((bin_len + cap_len + 1) * sizeof<byte>));
+    defer { free(cmd); }
+
+    mem::memcpy(cast<*void>(cmd), cast<*void>(TEST_BIN_PATH), bin_len);
+    mem::memcpy(cast<*void>(&cmd[bin_len]), cast<*void>(TEST_CAPTURE), cap_len);
+    cmd[bin_len + cap_len] = '\0';
+
+    return system(cmd);
+}
+
+const show_captured_output -> fn () void {
+    let out: *byte = io::read_file(TEST_OUT_PATH);
+    if (out == cast<*byte>(0)) return;
+    defer { free(out); }
+    if (out[0] == '\0') return;
+
+    io::print("      --- captured output ---\n", [io::NULL_FORMAT_ARG]);
+    system(TEST_SHOW_OUT);
+}
+
+/// Compile (and unless expect_error, also run) a single test file.
+/// Returns 1 on pass, 0 on fail. Prints one PASS/FAIL line per test.
+const run_one_test -> fn (path: *byte, expect_error: int) int {
+    let cmd_str: String = make_compile_cmd(path, expect_error);
+    defer { string::free_string(&cmd_str); }
+
+    let compile_result: int = system(cmd_str.slice.ptr);
+
+    let passed: int = 0;
+    let compiled_ok: int = 1;
+    if (compile_result != 0) compiled_ok = 0;
+
+    let run_result: int = 0;
+    let show_capture: int = 0;
+
+    if (expect_error == 1) {
+        // Error tests pass when compilation fails.
+        if (compiled_ok == 0) passed = 1;
+    } else {
+        if (compiled_ok == 0) {
+            show_capture = 1;
+        } else {
+            run_result = run_test_binary();
+            if (run_result == 0) {
+                passed = 1;
+            } else {
+                show_capture = 1;
+            }
+        }
+    }
+
+    if (passed == 1) {
+        io::print("%s[PASS]%s %s\n", [io::str_arg(term::GREEN),
+                                      io::str_arg(term::RESET),
+                                      io::str_arg(path)]);
+    } else {
+        io::print("%s[FAIL]%s %s\n", [io::str_arg(term::RED),
+                                      io::str_arg(term::RESET),
+                                      io::str_arg(path)]);
+        if (expect_error == 1 && compiled_ok == 1) {
+            io::print("      expected a compile error, but compilation succeeded\n",
+                      [io::NULL_FORMAT_ARG]);
+        } elif (show_capture == 1) {
+            if (compiled_ok == 1) {
+                // system() returns a raw wait status; decode normal exits.
+                let code: int = run_result;
+                if (code >= 256) code = code / 256;
+                io::print("      exited with code %d\n", [io::int_arg(code)]);
+            }
+            show_captured_output();
+        }
+    }
+
+    return passed;
+}
+
+/// Run all configured tests: valid tests must compile and exit 0,
+/// error tests must fail to compile.
+const run_tests -> fn () int {
+    io::print("\n=== Running Tests ===\n", [io::NULL_FORMAT_ARG]);
+
+    // Collect test lists from lumix.toml, falling back to conventional dirs.
+    let valid_list: **byte = cast<**byte>(alloc(MAX_TEST_FILES * sizeof<*byte>));
+    defer { free(valid_list); }
+    let error_list: **byte = cast<**byte>(alloc(MAX_TEST_FILES * sizeof<*byte>));
+    defer { free(error_list); }
+    let valid_n: int = 0;
+    let error_n: int = 0;
+    let owns_lists: int = 0;
+
+    let tcfg_valid: int = toml::get_test_valid_count();
+    let tcfg_error: int = toml::get_test_error_count();
+
+    if (tcfg_valid == 0 && tcfg_error == 0) {
+        owns_lists = 1;
+
+        let fc: int = 0;
+        let fl: **byte = fs::scan_directory("tests/valid", &fc);
+        loop [j: int = 0](j < fc && valid_n < MAX_TEST_FILES) : (j = j + 1) {
+            valid_list[valid_n] = fl[j];
+            valid_n = valid_n + 1;
+        }
+        free(fl);
+
+        let ec: int = 0;
+        let el: **byte = fs::scan_directory("tests/errors", &ec);
+        loop [j: int = 0](j < ec && error_n < MAX_TEST_FILES) : (j = j + 1) {
+            error_list[error_n] = el[j];
+            error_n = error_n + 1;
+        }
+        free(el);
+    } else {
+        loop [i: int = 0](i < tcfg_valid && valid_n < MAX_TEST_FILES) : (i = i + 1) {
+            valid_list[valid_n] = toml::get_test_valid_path(i);
+            valid_n = valid_n + 1;
+        }
+        loop [i: int = 0](i < tcfg_error && error_n < MAX_TEST_FILES) : (i = i + 1) {
+            error_list[error_n] = toml::get_test_error_path(i);
+            error_n = error_n + 1;
+        }
+    }
+
+    let total: int = valid_n + error_n;
+    if (total == 0) {
+        io::print_err("No tests found.\nAdd a [test] section to lumix.toml or create tests/valid/ and tests/errors/ directories.\n\n", [0]);
+        return 1;
+    }
+
+    io::print("Running %d test(s): %d valid, %d error-expected\n\n",
+              [io::int_arg(total), io::int_arg(valid_n), io::int_arg(error_n)]);
+
+    let failed: int = 0;
+
+    loop [i: int = 0](i < valid_n) : (i = i + 1) {
+        if (run_one_test(valid_list[i], 0) == 0) failed = failed + 1;
+    }
+
+    loop [i: int = 0](i < error_n) : (i = i + 1) {
+        if (run_one_test(error_list[i], 1) == 0) failed = failed + 1;
+    }
+
+    system(TEST_RM_CMD);
+
+    if (owns_lists == 1) {
+        loop [i: int = 0](i < valid_n) : (i = i + 1) { free(valid_list[i]); }
+        loop [i: int = 0](i < error_n) : (i = i + 1) { free(error_list[i]); }
+    } else {
+        toml::free_test_paths();
+    }
+
+    let passed_total: int = total - failed;
+    if (failed == 0) {
+        io::print("\n%s%d/%d tests passed%s\n\n", [io::str_arg(term::GREEN),
+                                                    io::int_arg(passed_total),
+                                                    io::int_arg(total),
+                                                    io::str_arg(term::RESET)]);
+    } else {
+        io::print("\n%s%d/%d tests passed (%d failed)%s\n\n", [io::str_arg(term::RED),
+                                                                io::int_arg(passed_total),
+                                                                io::int_arg(total),
+                                                                io::int_arg(failed),
+                                                                io::str_arg(term::RESET)]);
+    }
+
+    if (failed > 0) return 1;
+    return 0;
+}
+
 const handle_build -> fn (argc: int, argv: **byte) int {
     // --- Load lumix.toml if present ---
     let tcfg: TomlConfig = toml::parse_toml();
@@ -676,7 +979,7 @@ const handle_build -> fn (argc: int, argv: **byte) int {
 pub const main -> fn (argc: int, argv: **byte) int {
     let cmd: *byte = argv[1];
     if (cmd == cast<*byte>(0)) {
-        io::print("Usage:\n  init              Scaffold a new lumix.toml\n  config            Show resolved configuration\n  build [<name>]    Build the project\n  run               Build and execute the project\n  clean             Remove build artifacts\n  deps              Show dependency tree\n  version           Show version\n",
+        io::print("Usage:\n  init              Scaffold a new lumix.toml\n  config            Show resolved configuration\n  build [<name>]    Build the project\n  run               Build and execute the project\n  test              Run test suites from lumix.toml [test]\n  clean             Remove build artifacts\n  deps              Show dependency tree\n  version           Show version\n",
         [io::NULL_FORMAT_ARG]);
         return 1;
     }
@@ -691,7 +994,7 @@ pub const main -> fn (argc: int, argv: **byte) int {
         return show_deps();
     }
     if (string::strcmp(cmd, "version") == 0) {
-        io::print("Luma Build System v1.11\n", [io::NULL_FORMAT_ARG]);
+        io::print("Luma Build System v1.12\n", [io::NULL_FORMAT_ARG]);
         return 0;
     }
     if (string::strcmp(cmd, "init") == 0) {
@@ -703,8 +1006,11 @@ pub const main -> fn (argc: int, argv: **byte) int {
     if (string::strcmp(cmd, "run") == 0) {
         return run_binary();
     }
+    if (string::strcmp(cmd, "test") == 0) {
+        return run_tests();
+    }
 
-    io::print("\nUnknown command: %s\nUsage:\n  init              Scaffold a new lumix.toml\n  config            Show resolved configuration\n  build [<name>]    Build the project\n  run               Build and execute the project\n  clean             Remove build artifacts\n  deps              Show dependency tree\n  version           Show version\n",
+    io::print("\nUnknown command: %s\nUsage:\n  init              Scaffold a new lumix.toml\n  config            Show resolved configuration\n  build [<name>]    Build the project\n  run               Build and execute the project\n  test              Run test suites from lumix.toml [test]\n  clean             Remove build artifacts\n  deps              Show dependency tree\n  version           Show version\n",
     [io::str_arg(cmd)]);
     return 1;
 }

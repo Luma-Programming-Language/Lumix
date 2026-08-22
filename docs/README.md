@@ -1,6 +1,6 @@
 # Lumix Build System
 
-**Version:** 1.10  
+**Version:** 1.12  
 **Language:** Luma
 
 ## Overview
@@ -44,6 +44,7 @@ This creates the `lumix` executable at `bin/lumix`.
 | `deps` | Show dependency tree |
 | `init` | Scaffold a new `lumix.toml` |
 | `run` | Build and execute the project binary |
+| `test` | Compile and run test suites from `[test]` in `lumix.toml` |
 | `version` | Print the current Lumix version |
 
 ---
@@ -191,6 +192,44 @@ Builds the project and then executes the resulting binary. Uses the same configu
 
 ---
 
+### Test Command
+
+```
+./lumix test
+```
+
+Compiles and runs test suites declared under `[test]` in `lumix.toml`. Each test is a standalone `.lx` program compiled individually with the `luma` compiler:
+
+- **Valid tests** (`valid = [...]`) must compile **and** exit with code `0` when executed.
+- **Error tests** (`errors = [...]`) must **fail to compile** — ideal for testing that bad code produces compiler errors.
+
+Entries follow the same rules as `[dependencies] paths`: strings ending in `.lx` are single test files; all other entries are directories scanned recursively for `.lx` files.
+
+**Example output:**
+
+```
+=== Running Tests ===
+Running 3 test(s): 2 valid, 1 error-expected
+
+[PASS] tests/valid/add.lx
+[FAIL] tests/valid/crash.lx
+      exited with code 7
+[PASS] tests/errors/bad.lx
+
+2/3 tests passed (1 failed)
+```
+
+Failing valid tests show the captured compiler/runtime output beneath their line, making failures easy to debug. The command exits non-zero when any test fails, so it can gate CI pipelines.
+
+**Notes:**
+
+- If no `[test]` section is present, Lumix falls back to the conventional `tests/valid/` and `tests/errors/` directories.
+- Each test file must begin with an `@module` declaration and contain its own `pub const main -> fn`.
+- Tests should be self-contained or depend only on `std_*` modules (project modules are not linked into tests).
+- Lumix wipes the transient `obj/` cache before each test compile to prevent stale `main` symbols from breaking linking.
+
+---
+
 ## lumix.toml Configuration
 
 Lumix automatically reads `lumix.toml` from the current working directory when running `build`. All fields are optional — any field not set falls back to the default behavior described below.
@@ -217,6 +256,15 @@ binary_dir = "bin"
 
 [run]
 args = "--debug --port 8080"
+
+[test]
+valid = [
+    "tests/valid/",
+    "tests/extra_checks.lx"
+]
+errors = [
+    "tests/errors/"
+]
 ```
 
 ### Sections and Fields
@@ -252,6 +300,13 @@ args = "--debug --port 8080"
 |-------|------|-------------|---------|
 | `args` | string | Arguments passed to the binary when using `run` | *(none)* |
 
+#### `[test]`
+
+| Field | Type | Description | Default |
+|-------|------|-------------|---------|
+| `valid` | array of strings | Test programs that must compile and exit `0`. `.lx` entries are single files; others are scanned recursively | *(none — falls back to `tests/valid/`)* |
+| `errors` | array of strings | Test programs that must fail to compile. Same expansion rules as `valid` | *(none — falls back to `tests/errors/`)* |
+
 ### Priority Rules
 
 When both `lumix.toml` and command-line arguments are present, the following priority order applies:
@@ -263,6 +318,7 @@ When both `lumix.toml` and command-line arguments are present, the following pri
 - **Build flags:** `[build] flags` > *(none)*
 - **Dependency paths:** `[dependencies] paths` — appended as extra source files; directories expanded to all `.lx` files
 - **Run arguments:** `[run] args` — passed to the binary when executing `run`
+- **Test suites:** `[test] valid` / `[test] errors` — used by `test`; falls back to conventional directories when unset
 
 ### Comments
 
@@ -338,7 +394,7 @@ The `has_dep()` function checks whether a dependency path is already present in 
 
 | File | Module | Role |
 |------|--------|------|
-| `lumix.lx` | `build` | Main entry point, CLI dispatcher, build orchestration |
+| `lumix.lx` | `build` | Main entry point, CLI dispatcher, build orchestration, test runner |
 | `file_system.lx` | `file_system` | File discovery and directory operations |
 | `parser.lx` | `parse` | Parsing `@use` directives and file path lines |
 | `module.lx` | `module` | Module name extraction from file paths |
