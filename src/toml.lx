@@ -20,13 +20,13 @@ pub const TomlConfig -> struct {
 const TOML_FILE: *byte = "lumix.toml";
 
 const MAX_TOML_DEPS: int = 20;
-let g_dep_paths: [*byte; 20];
+let g_dep_paths: **byte = cast<**byte>(0);
 let g_dep_count: int = 0;
 
 const MAX_TOML_TESTS: int = 50;
-let g_test_valid_paths: [*byte; 50];
+let g_test_valid_paths: **byte = cast<**byte>(0);
 let g_test_valid_count: int = 0;
-let g_test_error_paths: [*byte; 50];
+let g_test_error_paths: **byte = cast<**byte>(0);
 let g_test_error_count: int = 0;
 
 /// Skip whitespace (spaces and tabs) in-place, returns new index.
@@ -201,6 +201,21 @@ pub const parse_toml -> fn () TomlConfig {
     g_dep_count = 0;
     g_test_valid_count = 0;
     g_test_error_count = 0;
+
+    // Lazily heap-allocate the path-array buffers instead of using fixed-size
+    // global arrays: passing a fixed-size array by name to a function
+    // expecting a pointer does not decay to a pointer in Luma's codegen -
+    // it gets spilled across argument registers by value, clobbering the
+    // scalar arguments that follow (e.g. `count`), which segfaults.
+    if (g_dep_paths == cast<**byte>(0)) {
+        g_dep_paths = cast<**byte>(alloc(MAX_TOML_DEPS * sizeof<*byte>));
+    }
+    if (g_test_valid_paths == cast<**byte>(0)) {
+        g_test_valid_paths = cast<**byte>(alloc(MAX_TOML_TESTS * sizeof<*byte>));
+    }
+    if (g_test_error_paths == cast<**byte>(0)) {
+        g_test_error_paths = cast<**byte>(alloc(MAX_TOML_TESTS * sizeof<*byte>));
+    }
 
     let key_buf: [byte; 64];
     let val_buf: [byte; 256];

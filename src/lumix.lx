@@ -798,6 +798,9 @@ const run_one_test -> fn (path: *byte, expect_error: int) int {
 const run_tests -> fn () int {
     io::print("\n=== Running Tests ===\n", [io::NULL_FORMAT_ARG]);
 
+    let tcfg: TomlConfig = toml::parse_toml();
+    defer { toml::free_toml_config(&tcfg); }
+
     // Collect test lists from lumix.toml, falling back to conventional dirs.
     let valid_list: **byte = cast<**byte>(alloc(MAX_TEST_FILES * sizeof<*byte>));
     defer { free(valid_list); }
