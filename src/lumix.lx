@@ -28,7 +28,7 @@ const BuildConfig -> struct {
     verbose:       int
 };
 
-const NULL_BYTE: Slice = Slice { ptr: "", len: 0 };
+const NULL_BYTE: string::Slice = string::Slice { ptr: "", len: 0 };
 const STD_PREFIX_LEN: int = 4;
 const MAX_TEST_FILES: int = 500;
 
@@ -196,7 +196,7 @@ const build_dep_graph -> fn (scan_path: *byte) int {
     return g_graph_size;
 }
 
-const has_dep -> fn (slice_ptr: *Slice, slice_count: int, dep_path: *byte) int {
+const has_dep -> fn (slice_ptr: *string::Slice, slice_count: int, dep_path: *byte) int {
     loop [i: int = 0](i < slice_count) : (i = i + 1) {
         if (string::strcmp(slice_ptr[i].ptr, dep_path) == 0) return 1;
     }
@@ -229,7 +229,7 @@ const convert_std_module_path -> fn (dep_name: *byte) *byte {
 }
 
 #returns_ownership
-const add_dependencies_to_cmd -> fn (slice: *Slice, slice_count: *int, config: *BuildConfig) void {
+const add_dependencies_to_cmd -> fn (slice: *string::Slice, slice_count: *int, config: *BuildConfig) void {
     loop [i: int = 0](i < g_graph_size) : (i = i + 1) {
         loop [j: int = 0](j < g_dep_counts[i]) : (j = j + 1) {
             let dep_name: **byte = g_dependencies[i];
@@ -263,8 +263,8 @@ const add_dependencies_to_cmd -> fn (slice: *Slice, slice_count: *int, config: *
     }
 }
 
-const build_compile_command -> fn (config: *BuildConfig) String {
-    let slice: *Slice = cast<*Slice>(alloc(200 * sizeof<Slice>));
+const build_compile_command -> fn (config: *BuildConfig) string::String {
+    let slice: *string::Slice = cast<*string::Slice>(alloc(200 * sizeof<string::Slice>));
     defer { free(slice); }
 
     let slice_count: int = 0;
@@ -295,7 +295,7 @@ const build_compile_command -> fn (config: *BuildConfig) String {
     slice[slice_count++] = slice.null_terminated_slice(full_output);
     slice[slice_count] = NULL_BYTE;
 
-    let cmd_str: String;
+    let cmd_str: string::String;
     cmd_str = cmd_str.concat_strs(slice, slice_count);
 
     if (needs_free_output == 1) free(full_output);
@@ -335,7 +335,7 @@ const build -> fn (config: *BuildConfig) int {
 
     if (build_dep_graph(config.scan_path) == 0) return 1;
 
-    let cmd_str: String = build_compile_command(config);
+    let cmd_str: string::String = build_compile_command(config);
     defer { string::free_string(&cmd_str); }
 
     io::print("Executing command:\n%s%s%s\n\t", [io::str_arg(term::RED),
@@ -464,7 +464,7 @@ const init_project -> fn () int {
 const show_config -> fn () int {
     io::print("\n=== Configuration ===\n", [io::NULL_FORMAT_ARG]);
 
-    let tcfg: TomlConfig = toml::parse_toml();
+    let tcfg: toml::TomlConfig = toml::parse_toml();
     defer { toml::free_toml_config(&tcfg); }
 
     if (tcfg.found == 1) {
@@ -538,34 +538,34 @@ const show_config -> fn () int {
 
 const run_binary -> fn () int {
     // --- Resolve config (same as build) ---
-    let tcfg: TomlConfig = toml::parse_toml();
+    let tcfg: toml::TomlConfig = toml::parse_toml();
     defer { toml::free_toml_config(&tcfg); }
 
     if (tcfg.found == 1) {
         io::print("lumix.toml found — using config file.\n", [io::NULL_FORMAT_ARG]);
     }
 
-    let auto_entry: *byte = cast<*byte>(0);
     let entry_point: *byte;
+    let free_entry: int = 0;
 
     if (tcfg.entry != cast<*byte>(0)) {
         entry_point = tcfg.entry;
     } else {
-        auto_entry = find_entry_point(".");
-        if (auto_entry != cast<*byte>(0)) {
-            entry_point = auto_entry;
+        entry_point = find_entry_point(".");
+        if (entry_point != cast<*byte>(0)) {
+            free_entry = 1;
         } else {
             io::print("No entry point auto-detected.\n", [io::NULL_FORMAT_ARG]);
             return 1;
         }
     }
+    defer { if (free_entry == 1) free(entry_point); }
 
     let output_name: *byte;
     if (tcfg.name != cast<*byte>(0)) {
         output_name = tcfg.name;
     } else {
         io::print("No output name set. Set 'name' in lumix.toml.\n", [io::NULL_FORMAT_ARG]);
-        if (auto_entry != cast<*byte>(0)) free(auto_entry);
         return 1;
     }
 
@@ -589,7 +589,6 @@ const run_binary -> fn () int {
 
     let build_result: int = build(&config);
     if (build_result != 0) {
-        if (auto_entry != cast<*byte>(0)) free(auto_entry);
         return build_result;
     }
 
@@ -633,7 +632,6 @@ const run_binary -> fn () int {
     }
 
     if (needs_free == 1) free(full_path);
-    if (auto_entry != cast<*byte>(0)) free(auto_entry);
     return run_result;
 }
 
@@ -644,8 +642,8 @@ const run_binary -> fn () int {
 /// When silent is 1 all compiler output is discarded; otherwise it is
 /// captured to TEST_OUT_PATH so failures can show it.
 #returns_ownership
-const make_compile_cmd -> fn (test_path: *byte, silent: int) String {
-    let slice: *Slice = cast<*Slice>(alloc(64 * sizeof<Slice>));
+const make_compile_cmd -> fn (test_path: *byte, silent: int) string::String {
+    let slice: *string::Slice = cast<*string::Slice>(alloc(64 * sizeof<string::Slice>));
     defer { free(slice); }
 
     let n: int = 0;
@@ -702,7 +700,7 @@ const make_compile_cmd -> fn (test_path: *byte, silent: int) String {
         slice[n++] = slice.null_terminated_slice(TEST_CAPTURE);
     }
     slice[n] = NULL_BYTE;
-    let cmd_str: String;
+    let cmd_str: string::String;
     cmd_str = cmd_str.concat_strs(slice, n);
 
     loop [i: int = 0](i < conv_n) : (i = i + 1) {
@@ -740,7 +738,7 @@ const show_captured_output -> fn () void {
 /// Compile (and unless expect_error, also run) a single test file.
 /// Returns 1 on pass, 0 on fail. Prints one PASS/FAIL line per test.
 const run_one_test -> fn (path: *byte, expect_error: int) int {
-    let cmd_str: String = make_compile_cmd(path, expect_error);
+    let cmd_str: string::String = make_compile_cmd(path, expect_error);
     defer { string::free_string(&cmd_str); }
 
     let compile_result: int = system(cmd_str.slice.ptr);
@@ -798,7 +796,7 @@ const run_one_test -> fn (path: *byte, expect_error: int) int {
 const run_tests -> fn () int {
     io::print("\n=== Running Tests ===\n", [io::NULL_FORMAT_ARG]);
 
-    let tcfg: TomlConfig = toml::parse_toml();
+    let tcfg: toml::TomlConfig = toml::parse_toml();
     defer { toml::free_toml_config(&tcfg); }
 
     // Collect test lists from lumix.toml, falling back to conventional dirs.
@@ -890,7 +888,7 @@ const run_tests -> fn () int {
 
 const handle_build -> fn (argc: int, argv: **byte) int {
     // --- Load lumix.toml if present ---
-    let tcfg: TomlConfig = toml::parse_toml();
+    let tcfg: toml::TomlConfig = toml::parse_toml();
     defer { toml::free_toml_config(&tcfg); }
 
     if (tcfg.found == 1) {
@@ -898,15 +896,15 @@ const handle_build -> fn (argc: int, argv: **byte) int {
     }
 
     // --- Resolve entry point ---
-    let auto_entry: *byte = cast<*byte>(0);
     let entry_point: *byte;
+    let free_entry: int = 0;
 
     if (tcfg.entry != cast<*byte>(0)) {
         entry_point = tcfg.entry;
     } else {
-        auto_entry = find_entry_point(".");
-        if (auto_entry != cast<*byte>(0)) {
-            entry_point = auto_entry;
+        entry_point = find_entry_point(".");
+        if (entry_point != cast<*byte>(0)) {
+            free_entry = 1;
         } else {
             io::print("No entry point auto-detected.\n", [io::NULL_FORMAT_ARG]);
             let entry_buffer: [byte; 256];
@@ -916,9 +914,10 @@ const handle_build -> fn (argc: int, argv: **byte) int {
                 cast<*byte>(&entry_buffer),
                 256
             );
-            auto_entry = cast<*byte>(0);
+            free_entry = 0;
         }
     }
+    defer { if (free_entry == 1) free(entry_point); }
 
     // --- Resolve output name ---
     let output_name: *byte;
@@ -929,7 +928,6 @@ const handle_build -> fn (argc: int, argv: **byte) int {
     } else {
         io::print("No output name provided. Supply one after 'build' or set 'name' in lumix.toml.\n",
                   [io::NULL_FORMAT_ARG]);
-        if (auto_entry != cast<*byte>(0)) free(auto_entry);
         return 1;
     }
 
@@ -975,7 +973,6 @@ const handle_build -> fn (argc: int, argv: **byte) int {
     };
 
     let result: int = build(&config);
-    if (auto_entry != cast<*byte>(0)) free(auto_entry);
     return result;
 }
 
