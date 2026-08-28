@@ -126,6 +126,14 @@ const find_entry_point -> fn (scan_path: *byte) *byte {
     return entry_point;
 }
 
+const is_excluded -> fn (filepath: *byte) int {
+    let exclude_count: int = toml::get_exclude_count();
+    loop [i: int = 0](i < exclude_count) : (i = i + 1) {
+        if (string::strcmp(toml::get_exclude_path(i), filepath) == 0) return 1;
+    }
+    return 0;
+}
+
 const build_dep_graph -> fn (scan_path: *byte) int {
     g_graph_size = 0;
 
@@ -147,6 +155,11 @@ const build_dep_graph -> fn (scan_path: *byte) int {
 
     loop [i: int = 0](i < file_count && g_graph_size < fs::MAX_FILES) : (i = i + 1) {
         let filepath: *byte = files[i];
+
+        if (is_excluded(filepath) == 1) {
+            free(filepath);
+            continue;
+        }
 
         g_module_names[g_graph_size] = module::extract_module_name(filepath);
         if (g_module_names[g_graph_size] == cast<*byte>(0)) {
@@ -347,6 +360,7 @@ const build -> fn (config: *BuildConfig) int {
         io::print_err("\nError: Build failed with exit code %d\n\n", [compile_result]);
         free_dep_graph();
         toml::free_dep_paths();
+        toml::free_exclude_paths();
         return compile_result;
     }
 
@@ -355,6 +369,7 @@ const build -> fn (config: *BuildConfig) int {
 
     free_dep_graph();
     toml::free_dep_paths();
+    toml::free_exclude_paths();
 
     return 0;
 }
@@ -491,6 +506,29 @@ const show_config -> fn () int {
         io::print("\n", [io::NULL_FORMAT_ARG]);
         loop [i: int = 0](i < dep_count) : (i = i + 1) {
             io::print("    - %c%s%c\n", [io::byte_arg('"'), io::str_arg(toml::get_dep_path(i)), io::byte_arg('"')]);
+        }
+    } else {
+        io::print("(none)\n", [io::NULL_FORMAT_ARG]);
+    }
+
+    io::print("\n[dependencies]\n", [io::NULL_FORMAT_ARG]);
+    io::print("  paths     = ", [io::NULL_FORMAT_ARG]);
+    let dep_count: int = toml::get_dep_count();
+    if (dep_count > 0) {
+        io::print("\n", [io::NULL_FORMAT_ARG]);
+        loop [i: int = 0](i < dep_count) : (i = i + 1) {
+            io::print("    - %c%s%c\n", [io::byte_arg('"'), io::str_arg(toml::get_dep_path(i)), io::byte_arg('"')]);
+        }
+    } else {
+        io::print("(none)\n", [io::NULL_FORMAT_ARG]);
+    }
+
+    io::print("  exclude   = ", [io::NULL_FORMAT_ARG]);
+    let excl_count: int = toml::get_exclude_count();
+    if (excl_count > 0) {
+        io::print("\n", [io::NULL_FORMAT_ARG]);
+        loop [i: int = 0](i < excl_count) : (i = i + 1) {
+            io::print("    - %c%s%c\n", [io::byte_arg('"'), io::str_arg(toml::get_exclude_path(i)), io::byte_arg('"')]);
         }
     } else {
         io::print("(none)\n", [io::NULL_FORMAT_ARG]);

@@ -23,6 +23,10 @@ const MAX_TOML_DEPS: int = 20;
 let g_dep_paths: **byte = cast<**byte>(0);
 let g_dep_count: int = 0;
 
+const MAX_TOML_EXCLUDES: int = 20;
+let g_exclude_paths: **byte = cast<**byte>(0);
+let g_exclude_count: int = 0;
+
 const MAX_TOML_TESTS: int = 50;
 let g_test_valid_paths: **byte = cast<**byte>(0);
 let g_test_valid_count: int = 0;
@@ -199,6 +203,7 @@ pub const parse_toml -> fn () TomlConfig {
     let in_test:    int = 0;
 
     g_dep_count = 0;
+    g_exclude_count = 0;
     g_test_valid_count = 0;
     g_test_error_count = 0;
 
@@ -209,6 +214,9 @@ pub const parse_toml -> fn () TomlConfig {
     // scalar arguments that follow (e.g. `count`), which segfaults.
     if (g_dep_paths == cast<**byte>(0)) {
         g_dep_paths = cast<**byte>(alloc(MAX_TOML_DEPS * sizeof<*byte>));
+    }
+    if (g_exclude_paths == cast<**byte>(0)) {
+        g_exclude_paths = cast<**byte>(alloc(MAX_TOML_EXCLUDES * sizeof<*byte>));
     }
     if (g_test_valid_paths == cast<**byte>(0)) {
         g_test_valid_paths = cast<**byte>(alloc(MAX_TOML_TESTS * sizeof<*byte>));
@@ -240,19 +248,19 @@ pub const parse_toml -> fn () TomlConfig {
             i = skip_ws(src, i);
             if (src[i] == ']') i = i + 1;
 
-            in_project = 0;
+            in_project    = 0;
             in_dependency = 0;
-            in_output  = 0;
-            in_build   = 0;
-            in_run     = 0;
-            in_test    = 0;
+            in_output     = 0;
+            in_build      = 0;
+            in_run        = 0;
+            in_test       = 0;
 
-            if (string::strcmp(cast<*byte>(&key_buf), "project")  == 0) in_project = 1;
+            if   (string::strcmp(cast<*byte>(&key_buf), "project")      == 0) in_project    = 1;
             elif (string::strcmp(cast<*byte>(&key_buf), "dependencies") == 0) in_dependency = 1;
-            elif (string::strcmp(cast<*byte>(&key_buf), "output") == 0) in_output  = 1;
-            elif (string::strcmp(cast<*byte>(&key_buf), "build")  == 0) in_build   = 1;
-            elif (string::strcmp(cast<*byte>(&key_buf), "run")  == 0) in_run   = 1;
-            elif (string::strcmp(cast<*byte>(&key_buf), "test")  == 0) in_test   = 1;
+            elif (string::strcmp(cast<*byte>(&key_buf), "output")       == 0) in_output     = 1;
+            elif (string::strcmp(cast<*byte>(&key_buf), "build")        == 0) in_build      = 1;
+            elif (string::strcmp(cast<*byte>(&key_buf), "run")          == 0) in_run        = 1;
+            elif (string::strcmp(cast<*byte>(&key_buf), "test")         == 0) in_test       = 1;
 
             i = skip_line(src, i);
             continue;
@@ -284,6 +292,9 @@ pub const parse_toml -> fn () TomlConfig {
         if (in_dependency == 1) {
             if (string::strcmp(cast<*byte>(&key_buf), "paths") == 0) {
                 i = read_path_array(src, i, g_dep_paths, &g_dep_count, MAX_TOML_DEPS);
+            }
+            if (string::strcmp(cast<*byte>(&key_buf), "exclude") == 0) {
+                i = read_path_array(src, i, g_exclude_paths, &g_exclude_count, MAX_TOML_EXCLUDES);
             }
         }
 
@@ -348,6 +359,23 @@ pub const free_dep_paths -> fn () void {
         g_dep_paths[i] = cast<*byte>(0);
     }
     g_dep_count = 0;
+}
+
+pub const get_exclude_count -> fn () int {
+    return g_exclude_count;
+}
+
+pub const get_exclude_path -> fn (i: int) *byte {
+    if (i >= 0 && i < g_exclude_count) return g_exclude_paths[i];
+    return cast<*byte>(0);
+}
+
+pub const free_exclude_paths -> fn () void {
+    loop [i: int = 0](i < g_exclude_count) : (i = i + 1) {
+        free(g_exclude_paths[i]);
+        g_exclude_paths[i] = cast<*byte>(0);
+    }
+    g_exclude_count = 0;
 }
 
 pub const get_test_valid_count -> fn () int {
