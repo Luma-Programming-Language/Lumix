@@ -174,7 +174,7 @@ Config file: lumix.toml
   paths     = (none)
 
 [run]
-  args      = (none)
+  (none)
 
 --- Auto-Detected ---
   entry     = "src/utility.lx"
@@ -185,10 +185,13 @@ Config file: lumix.toml
 ### Run Command
 
 ```
-./lumix run
+./lumix run                # run the first (default) command
+./lumix run build          # run the command keyed "build"
+./lumix run build install  # run multiple commands in sequence
+./lumix run 1              # run the command keyed "1"
 ```
 
-Builds the project and then executes the resulting binary. Uses the same configuration resolution as `build`. If `binary_dir` is set in `lumix.toml`, the binary is launched from that directory. Any arguments specified in the `[run] args` field are passed to the binary at execution time.
+Runs one or more shell commands selected from the `[run] args` array in `lumix.toml`. Each entry is a `key => "command"` pair; keys may be names or numbers. With no argument, the first entry is run. When multiple keys are given, each command runs in sequence, stopping at the first failure. Commands are executed directly via the shell, with multiline commands collapsed to a single line.
 
 ---
 
@@ -255,7 +258,10 @@ flags = "--no-sanitize -O3"
 binary_dir = "bin"
 
 [run]
-args = "--debug --port 8080"
+args = [
+    1     => "luma test/test.lx -name testing"
+    build => "luma src/main.lx -l lib/progress_bar.lx -O2 -name bin/luma"
+]
 
 [test]
 valid = [
@@ -298,7 +304,7 @@ errors = [
 
 | Field | Type | Description | Default |
 |-------|------|-------------|---------|
-| `args` | string | Arguments passed to the binary when using `run` | *(none)* |
+| `args` | array of `key => "command"` | Named shell commands run by `run`. `run` uses the first entry; `run <key>` selects by key | *(none)* |
 
 #### `[test]`
 
@@ -317,7 +323,7 @@ When both `lumix.toml` and command-line arguments are present, the following pri
 - **Binary directory:** `[output] binary_dir` > current directory
 - **Build flags:** `[build] flags` > *(none)*
 - **Dependency paths:** `[dependencies] paths` — appended as extra source files; directories expanded to all `.lx` files
-- **Run arguments:** `[run] args` — passed to the binary when executing `run`
+- **Run commands:** `[run] args` — a keyed array of shell commands selectable via `run`/`run <key>`
 - **Test suites:** `[test] valid` / `[test] errors` — used by `test`; falls back to conventional directories when unset
 
 ### Comments
@@ -329,6 +335,23 @@ TOML comments use `#`:
 [project]
 name = "myapp"  # inline comments are also supported
 ```
+
+### Multiline Strings
+
+Values (including `[run]` commands) may span multiple lines using TOML triple-quoted strings, which preserve the contained newlines:
+
+```toml
+[run]
+args = [
+    build => """
+        luma src/main.lx -l src/ast/expr.lx src/ast/module.lx
+             std/cstring.lx std/vector.lx
+             -O2 -name bin/luma
+        """
+]
+```
+
+Run commands are normalized before execution: newlines and indentation are collapsed into single spaces, so a multiline `[run]` command is executed as one shell command line.
 
 ---
 
@@ -412,7 +435,6 @@ const BuildConfig -> struct {
     stdlib_path:   *byte,   // Path to std lib (always "std")
     scan_path:     *byte,   // Directory to scan for .lx files
     binary_dir:    *byte,   // Output directory for the binary (optional)
-    run_args:      *byte,   // Arguments for run command (reserved)
     build_flags:   *byte,   // Extra compiler flags from lumix.toml
     optimize:      int,     // Optimization level (reserved)
     debug_symbols: int,     // Debug symbols flag (reserved)

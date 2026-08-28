@@ -6,14 +6,13 @@
 @use "file_system" as fs
 
 pub const TomlConfig -> struct {
-    name:       *byte,
-    entry:      *byte,
-    directory:  *byte,
-    optimize:   int,
-    found:      int,
-    binary_dir: *byte,
-    debug:      int,
-    run_args:   *byte,
+    name:        *byte,
+    entry:       *byte,
+    directory:   *byte,
+    optimize:    int,
+    found:       int,
+    binary_dir:  *byte,
+    debug:       int,
     build_flags: *byte
 };
 
@@ -32,6 +31,11 @@ let g_test_valid_paths: **byte = cast<**byte>(0);
 let g_test_valid_count: int = 0;
 let g_test_error_paths: **byte = cast<**byte>(0);
 let g_test_error_count: int = 0;
+
+const MAX_TOML_RUNS: int = 20;
+let g_run_keys: **byte = cast<**byte>(0);
+let g_run_commands: **byte = cast<**byte>(0);
+let g_run_count: int = 0;
 
 /// Skip whitespace (spaces and tabs) in-place, returns new index.
 const skip_ws -> fn (src: *byte, i: int) int {
@@ -80,6 +84,23 @@ const read_quoted -> fn (src: *byte, i: int, dest: *byte, max: int) int {
     return i;
 }
 
+/// Read a triple-quoted multiline string value (after the opening `"""`).
+/// Reads until the closing `"""`, preserving the contained newlines.
+const read_quoted_multiline -> fn (src: *byte, i: int, dest: *byte, max: int) int {
+    let n: int = 0;
+    loop (src[i] != '\0' && n < max - 1) {
+        if (src[i] == '"' && src[i + 1] == '"' && src[i + 2] == '"') {
+            i = i + 3;
+            break;
+        }
+        dest[n] = src[i];
+        n = n + 1;
+        i = i + 1;
+    }
+    dest[n] = '\0';
+    return i;
+}
+
 /// Read an unquoted value (until newline or comment).
 const read_unquoted -> fn (src: *byte, i: int, dest: *byte, max: int) int {
     let n: int = 0;
@@ -95,10 +116,13 @@ const read_unquoted -> fn (src: *byte, i: int, dest: *byte, max: int) int {
     return i;
 }
 
-/// Read a value (quoted or unquoted) into dest, advancing past the opening `"` if quoted.
-/// Returns the next position after the value.
+/// Read a value (quoted, multiline, or unquoted) into dest, advancing past
+/// the opening `"` / `"""` if quoted. Returns the next position after the value.
 const read_toml_value -> fn (src: *byte, i: int, dest: *byte, max: int) int {
-    if (src[i] == '"') {
+    if (src[i] == '"' && src[i + 1] == '"' && src[i + 2] == '"') {
+        i = i + 3;
+        i = read_quoted_multiline(src, i, dest, max);
+    } elif (src[i] == '"') {
         i = i + 1;
         i = read_quoted(src, i, dest, max);
     } else {
@@ -174,6 +198,58 @@ const read_path_array -> fn (src: *byte, i: int, dest: **byte, count: *int, max:
     return i;
 }
 
+/// Parse a TOML array of key => "command" run entries into global arrays.
+/// Keys may be bare names or numbers; values are quoted command strings.
+/// Returns the index just past the closing ']'.
+const read_run_args_array -> fn (src: *byte, i: int) int {
+    if (src[i] != '[') return i;
+    i = i + 1;
+    i = skip_ws(src, i);
+    let key_buf: [byte; 64];
+    let val_buf: [byte; 1024];
+    loop (src[i] != ']' && src[i] != '\0') {
+        let key_len: int = 0;
+        loop (src[i] != '\0' && src[i] != ']' && src[i] != ',' &&
+              src[i] != '\n' && src[i] != '\r' && src[i] != '=' &&
+              src[i] != '>' && src[i] != ' ' && src[i] != '\t' &&
+              key_len < 63) {
+            key_buf[key_len] = src[i];
+            key_len = key_len + 1;
+            i = i + 1;
+        }
+        key_buf[key_len] = '\0';
+
+        i = skip_ws(src, i);
+        if (src[i] == '=' && src[i + 1] == '>') {
+            i = i + 2;
+        }
+        i = skip_ws(src, i);
+
+        val_buf[0] = '\0';
+        if (src[i] == '"' && src[i + 1] == '"' && src[i + 2] == '"') {
+            i = i + 3;
+            i = read_quoted_multiline(src, i, cast<*byte>(&val_buf), 1024);
+        } elif (src[i] == '"') {
+            i = i + 1;
+            i = read_quoted(src, i, cast<*byte>(&val_buf), 1024);
+        }
+
+        if (key_len > 0 && val_buf[0] != '\0' && g_run_count < MAX_TOML_RUNS) {
+            g_run_keys[g_run_count] = heap_dup(cast<*byte>(&key_buf));
+            g_run_commands[g_run_count] = heap_dup(cast<*byte>(&val_buf));
+            g_run_count = g_run_count + 1;
+        }
+
+        i = skip_ws(src, i);
+        if (src[i] == ',') {
+            i = i + 1;
+            i = skip_ws(src, i);
+        }
+    }
+    if (src[i] == ']') i = i + 1;
+    return i;
+}
+
 #returns_ownership
 pub const parse_toml -> fn () TomlConfig {
     let cfg: TomlConfig;
@@ -184,7 +260,6 @@ pub const parse_toml -> fn () TomlConfig {
     cfg.found       = 0;
     cfg.binary_dir  = cast<*byte>(0);
     cfg.debug       = -1;
-    cfg.run_args    = cast<*byte>(0);
     cfg.build_flags = cast<*byte>(0);
 
     let src: *byte = io::read_file(TOML_FILE);
@@ -206,6 +281,7 @@ pub const parse_toml -> fn () TomlConfig {
     g_exclude_count = 0;
     g_test_valid_count = 0;
     g_test_error_count = 0;
+    g_run_count = 0;
 
     // Lazily heap-allocate the path-array buffers instead of using fixed-size
     // global arrays: passing a fixed-size array by name to a function
@@ -223,6 +299,12 @@ pub const parse_toml -> fn () TomlConfig {
     }
     if (g_test_error_paths == cast<**byte>(0)) {
         g_test_error_paths = cast<**byte>(alloc(MAX_TOML_TESTS * sizeof<*byte>));
+    }
+    if (g_run_keys == cast<**byte>(0)) {
+        g_run_keys = cast<**byte>(alloc(MAX_TOML_RUNS * sizeof<*byte>));
+    }
+    if (g_run_commands == cast<**byte>(0)) {
+        g_run_commands = cast<**byte>(alloc(MAX_TOML_RUNS * sizeof<*byte>));
     }
 
     let key_buf: [byte; 64];
@@ -323,8 +405,7 @@ pub const parse_toml -> fn () TomlConfig {
 
         if (in_run == 1) {
             if (string::strcmp(cast<*byte>(&key_buf), "args") == 0) {
-                i = read_toml_value(src, i, cast<*byte>(&val_buf), 256);
-                if (val_buf[0] != '\0') cfg.run_args = heap_dup(cast<*byte>(&val_buf));
+                i = read_run_args_array(src, i);
             }
         }
 
@@ -341,7 +422,6 @@ pub const free_toml_config -> fn (cfg: *TomlConfig) void {
     if (cfg.directory   != cast<*byte>(0)) { free(cfg.directory);   cfg.directory   = cast<*byte>(0); }
     if (cfg.binary_dir  != cast<*byte>(0)) { free(cfg.binary_dir);  cfg.binary_dir  = cast<*byte>(0); }
     if (cfg.build_flags != cast<*byte>(0)) { free(cfg.build_flags); cfg.build_flags = cast<*byte>(0); }
-    if (cfg.run_args    != cast<*byte>(0)) { free(cfg.run_args);    cfg.run_args    = cast<*byte>(0); }
 }
 
 pub const get_dep_count -> fn () int {
@@ -408,4 +488,36 @@ pub const free_test_paths -> fn () void {
         g_test_error_paths[i] = cast<*byte>(0);
     }
     g_test_error_count = 0;
+}
+
+pub const get_run_count -> fn () int {
+    return g_run_count;
+}
+
+pub const get_run_key -> fn (i: int) *byte {
+    if (i >= 0 && i < g_run_count) return g_run_keys[i];
+    return cast<*byte>(0);
+}
+
+pub const get_run_command -> fn (i: int) *byte {
+    if (i >= 0 && i < g_run_count) return g_run_commands[i];
+    return cast<*byte>(0);
+}
+
+/// Find the index of the run entry whose key matches name, or -1.
+pub const find_run_index -> fn (name: *byte) int {
+    loop [i: int = 0](i < g_run_count) : (i = i + 1) {
+        if (string::strcmp(g_run_keys[i], name) == 0) return i;
+    }
+    return -1;
+}
+
+pub const free_run_commands -> fn () void {
+    loop [i: int = 0](i < g_run_count) : (i = i + 1) {
+        free(g_run_keys[i]);
+        g_run_keys[i] = cast<*byte>(0);
+        free(g_run_commands[i]);
+        g_run_commands[i] = cast<*byte>(0);
+    }
+    g_run_count = 0;
 }

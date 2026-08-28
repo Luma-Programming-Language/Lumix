@@ -21,7 +21,6 @@ const BuildConfig -> struct {
     stdlib_path:   *byte,
     scan_path:     *byte,
     binary_dir:    *byte,
-    run_args:      *byte,
     build_flags:   *byte,
     optimize:      int,
     debug_symbols: int,
@@ -535,7 +534,17 @@ const show_config -> fn () int {
     }
 
     io::print("\n[run]\n", [io::NULL_FORMAT_ARG]);
-    print_field("args", tcfg.run_args, "(none)");
+    let run_n: int = toml::get_run_count();
+    if (run_n > 0) {
+        loop [i: int = 0](i < run_n) : (i = i + 1) {
+            io::print("    %s = %c%s%c\n", [io::str_arg(toml::get_run_key(i)),
+                                            io::byte_arg('"'),
+                                            io::str_arg(toml::get_run_command(i)),
+                                            io::byte_arg('"')]);
+        }
+    } else {
+        io::print("  (none)\n", [io::NULL_FORMAT_ARG]);
+    }
 
     io::print("\n[test]\n", [io::NULL_FORMAT_ARG]);
 
@@ -574,94 +583,51 @@ const show_config -> fn () int {
     return 0;
 }
 
-const run_binary -> fn () int {
-    // --- Resolve config (same as build) ---
-    let tcfg: toml::TomlConfig = toml::parse_toml();
-    defer { toml::free_toml_config(&tcfg); }
+/// Collapse whitespace in a command string into single spaces and trim the ends.
+/// This turns a multiline command (used for readability) into a single shell line.
+#returns_ownership
+const collapse_ws -> fn (src: *byte) *byte {
+    let len: int = string::strlen(src);
+    let out: *byte = cast<*byte>(alloc((len + 1) * sizeof<byte>));
+    let n: int = 0;
+    let in_ws: int = 0;
+    let i: int = 0;
 
-    if (tcfg.found == 1) {
-        io::print("lumix.toml found — using config file.\n", [io::NULL_FORMAT_ARG]);
-    }
-
-    let entry_point: *byte;
-    let free_entry: int = 0;
-
-    if (tcfg.entry != cast<*byte>(0)) {
-        entry_point = tcfg.entry;
-    } else {
-        entry_point = find_entry_point(".");
-        if (entry_point != cast<*byte>(0)) {
-            free_entry = 1;
+    loop (i < len) {
+        let c: byte = src[i];
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+            in_ws = 1;
         } else {
-            io::print("No entry point auto-detected.\n", [io::NULL_FORMAT_ARG]);
-            return 1;
+            if (in_ws == 1 && n > 0) {
+                out[n] = ' ';
+                n = n + 1;
+            }
+            in_ws = 0;
+            out[n] = c;
+            n = n + 1;
         }
+        i = i + 1;
     }
-    defer { if (free_entry == 1) free(entry_point); }
+    out[n] = '\0';
+    return out;
+}
 
-    let output_name: *byte;
-    if (tcfg.name != cast<*byte>(0)) {
-        output_name = tcfg.name;
+/// Run one selected run entry by index. Returns 0 on success, non-zero on failure.
+const run_one_target -> fn (index: int, default_run: int) int {
+    let run_key: *byte = toml::get_run_key(index);
+    let run_cmd: *byte = toml::get_run_command(index);
+
+    let flat_cmd: *byte = collapse_ws(run_cmd);
+    defer { free(flat_cmd); }
+
+    if (default_run == 1) {
+        io::print("\n=== Running (default: '%s') ===\n", [io::str_arg(run_key)]);
     } else {
-        io::print("No output name set. Set 'name' in lumix.toml.\n", [io::NULL_FORMAT_ARG]);
-        return 1;
+        io::print("\n=== Running ('%s') ===\n", [io::str_arg(run_key)]);
     }
+    io::print("%s%s%s\n", [io::str_arg(term::RED), io::str_arg(flat_cmd), io::str_arg(term::RESET)]);
 
-    let scan_dir: *byte = ".";
-    if (tcfg.directory != cast<*byte>(0)) {
-        scan_dir = tcfg.directory;
-    }
-
-    let config: BuildConfig = BuildConfig {
-        entry_point:   entry_point,
-        output_name:   output_name,
-        stdlib_path:   "std",
-        scan_path:     scan_dir,
-        binary_dir:    tcfg.binary_dir,
-        run_args:      tcfg.run_args,
-        build_flags:   tcfg.build_flags,
-        optimize:      0,
-        debug_symbols: 1,
-        verbose:       1
-    };
-
-    let build_result: int = build(&config);
-    if (build_result != 0) {
-        return build_result;
-    }
-
-    let full_path: *byte;
-    let needs_free: int = 0;
-
-    if (tcfg.binary_dir != cast<*byte>(0)) {
-        join_path(tcfg.binary_dir, output_name, &full_path);
-        needs_free = 1;
-    } else {
-        full_path = output_name;
-    }
-
-    let path_len: int = string::strlen(full_path);
-    let cmd_len: int = path_len + 1;
-    if (tcfg.run_args != cast<*byte>(0)) {
-        cmd_len = cmd_len + 1 + string::strlen(tcfg.run_args);
-    }
-
-    let run_cmd: *byte = cast<*byte>(alloc(cmd_len * sizeof<byte>));
-    defer { free(run_cmd); }
-
-    mem::memcpy(cast<*void>(run_cmd), cast<*void>(full_path), path_len);
-    let offset: int = path_len;
-    if (tcfg.run_args != cast<*byte>(0)) {
-        run_cmd[offset] = ' ';
-        offset = offset + 1;
-        let args_len: int = string::strlen(tcfg.run_args);
-        mem::memcpy(cast<*void>(&run_cmd[offset]), cast<*void>(tcfg.run_args), args_len);
-        offset = offset + args_len;
-    }
-    run_cmd[offset] = '\0';
-
-    io::print("\n=== Running ===\n%s\n", [io::str_arg(run_cmd)]);
-    let run_result: int = system(run_cmd);
+    let run_result: int = system(flat_cmd);
 
     if (run_result != 0) {
         io::print_err("Run failed with exit code %d\n\n", [run_result]);
@@ -669,8 +635,59 @@ const run_binary -> fn () int {
         io::print("Run completed.\n\n", [io::NULL_FORMAT_ARG]);
     }
 
-    if (needs_free == 1) free(full_path);
     return run_result;
+}
+
+const run_binary -> fn (argc: int, argv: **byte) int {
+    // --- Resolve config ---
+    let tcfg: toml::TomlConfig = toml::parse_toml();
+    defer { toml::free_toml_config(&tcfg); }
+
+    let run_count: int = toml::get_run_count();
+    if (run_count == 0) {
+        io::print_err("\nNo [run] args configured in lumix.toml.\n", [0]);
+        return 1;
+    }
+    defer { toml::free_run_commands(); }
+
+    // Collect the requested targets. With no keys given, run the first entry.
+    let target_start: int = 2;
+    let target_count: int = argc - target_start;
+    let all_default: int = 0;
+    if (target_count <= 0) {
+        target_count = 1;
+        all_default = 1;
+    }
+
+    let result: int = 0;
+    loop [k: int = 0](k < target_count) : (k = k + 1) {
+        let index: int;
+        let default_run: int = 0;
+
+        if (all_default == 1) {
+            index = 0;
+            default_run = 1;
+        } else {
+            index = toml::find_run_index(argv[target_start + k]);
+            if (index < 0) {
+                io::print("\nUnknown run target '%s'. Available:\n", [io::str_arg(argv[target_start + k])]);
+                loop [i: int = 0](i < run_count) : (i = i + 1) {
+                    io::print("  %s\n", [io::str_arg(toml::get_run_key(i))]);
+                }
+                io::print("\n", [io::NULL_FORMAT_ARG]);
+                result = 1;
+                break;
+            }
+        }
+
+        let r: int = run_one_target(index, default_run);
+        if (r != 0) {
+            result = r;
+            break;
+        }
+    }
+
+    return result;
 }
 
 /// Build the luma command that compiles a single test file into TEST_BIN_PATH.
@@ -1003,7 +1020,6 @@ const handle_build -> fn (argc: int, argv: **byte) int {
         stdlib_path:   "std",
         scan_path:     scan_dir,
         binary_dir:    tcfg.binary_dir,
-        run_args:      tcfg.run_args,
         build_flags:   tcfg.build_flags,
         optimize:      level,
         debug_symbols: dbg,
@@ -1017,7 +1033,7 @@ const handle_build -> fn (argc: int, argv: **byte) int {
 pub const main -> fn (argc: int, argv: **byte) int {
     let cmd: *byte = argv[1];
     if (cmd == cast<*byte>(0)) {
-        io::print("Usage:\n  init              Scaffold a new lumix.toml\n  config            Show resolved configuration\n  build [<name>]    Build the project\n  run               Build and execute the project\n  test              Run test suites from lumix.toml [test]\n  clean             Remove build artifacts\n  deps              Show dependency tree\n  version           Show version\n",
+        io::print("Usage:\n  init              Scaffold a new lumix.toml\n  config            Show resolved configuration\n  build [<name>]    Build the project\n  run [<key> ...]   Run command(s) from lumix.toml [run] args\n  test              Run test suites from lumix.toml [test]\n  clean             Remove build artifacts\n  deps              Show dependency tree\n  version           Show version\n",
         [io::NULL_FORMAT_ARG]);
         return 1;
     }
@@ -1042,13 +1058,13 @@ pub const main -> fn (argc: int, argv: **byte) int {
         return show_config();
     }
     if (string::strcmp(cmd, "run") == 0) {
-        return run_binary();
+        return run_binary(argc, argv);
     }
     if (string::strcmp(cmd, "test") == 0) {
         return run_tests();
     }
 
-    io::print("\nUnknown command: %s\nUsage:\n  init              Scaffold a new lumix.toml\n  config            Show resolved configuration\n  build [<name>]    Build the project\n  run               Build and execute the project\n  test              Run test suites from lumix.toml [test]\n  clean             Remove build artifacts\n  deps              Show dependency tree\n  version           Show version\n",
+    io::print("\nUnknown command: %s\nUsage:\n  init              Scaffold a new lumix.toml\n  config            Show resolved configuration\n  build [<name>]    Build the project\n  run [<key> ...]   Run command(s) from lumix.toml [run] args\n  test              Run test suites from lumix.toml [test]\n  clean             Remove build artifacts\n  deps              Show dependency tree\n  version           Show version\n",
     [io::str_arg(cmd)]);
     return 1;
 }
