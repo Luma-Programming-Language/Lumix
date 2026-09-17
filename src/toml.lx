@@ -9,36 +9,36 @@ pub const TomlConfig -> struct {
     name:        *byte,
     entry:       *byte,
     directory:   *byte,
-    optimize:    int,
-    found:       int,
+    optimize:    i64,
+    found:       i64,
     binary_dir:  *byte,
-    debug:       int,
+    debug:       i64,
     build_flags: *byte
 };
 
 const TOML_FILE: *byte = "lumix.toml";
 
-const MAX_TOML_DEPS: int = 20;
+const MAX_TOML_DEPS: i64 = 20;
 let g_dep_paths: **byte = cast<**byte>(0);
-let g_dep_count: int = 0;
+let g_dep_count: i64 = 0;
 
-const MAX_TOML_EXCLUDES: int = 20;
+const MAX_TOML_EXCLUDES: i64 = 20;
 let g_exclude_paths: **byte = cast<**byte>(0);
-let g_exclude_count: int = 0;
+let g_exclude_count: i64 = 0;
 
-const MAX_TOML_TESTS: int = 50;
+const MAX_TOML_TESTS: i64 = 50;
 let g_test_valid_paths: **byte = cast<**byte>(0);
-let g_test_valid_count: int = 0;
+let g_test_valid_count: i64 = 0;
 let g_test_error_paths: **byte = cast<**byte>(0);
-let g_test_error_count: int = 0;
+let g_test_error_count: i64 = 0;
 
-const MAX_TOML_RUNS: int = 20;
+const MAX_TOML_RUNS: i64 = 20;
 let g_run_keys: **byte = cast<**byte>(0);
 let g_run_commands: **byte = cast<**byte>(0);
-let g_run_count: int = 0;
+let g_run_count: i64 = 0;
 
 /// Skip whitespace (spaces and tabs) in-place, returns new index.
-const skip_ws -> fn (src: *byte, i: int) int {
+const skip_ws -> fn (src: *byte, i: i64) i64 {
     loop (src[i] == ' ' || src[i] == '\t' || src[i] == '\r' || src[i] == '\n') {
         i = i + 1;
     }
@@ -46,7 +46,7 @@ const skip_ws -> fn (src: *byte, i: int) int {
 }
 
 /// Skip to the next newline (or null terminator).
-const skip_line -> fn (src: *byte, i: int) int {
+const skip_line -> fn (src: *byte, i: i64) i64 {
     loop (src[i] != '\n' && src[i] != '\0') {
         i = i + 1;
     }
@@ -54,8 +54,8 @@ const skip_line -> fn (src: *byte, i: int) int {
 }
 
 /// Read a bare key (alphanumeric + underscore + hyphen) into dest.
-const read_key -> fn (src: *byte, i: int, dest: *byte, max: int) int {
-    let n: int = 0;
+const read_key -> fn (src: *byte, i: i64, dest: *byte, max: i64) i64 {
+    let n: i64 = 0;
     loop (n < max - 1) {
         let c: byte = src[i];
         if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
@@ -72,8 +72,8 @@ const read_key -> fn (src: *byte, i: int, dest: *byte, max: int) int {
 }
 
 /// Read a quoted string value (after the opening `"`).
-const read_quoted -> fn (src: *byte, i: int, dest: *byte, max: int) int {
-    let n: int = 0;
+const read_quoted -> fn (src: *byte, i: i64, dest: *byte, max: i64) i64 {
+    let n: i64 = 0;
     loop (src[i] != '"' && src[i] != '\0' && n < max - 1) {
         dest[n] = src[i];
         n = n + 1;
@@ -86,8 +86,8 @@ const read_quoted -> fn (src: *byte, i: int, dest: *byte, max: int) int {
 
 /// Read a triple-quoted multiline string value (after the opening `"""`).
 /// Reads until the closing `"""`, preserving the contained newlines.
-const read_quoted_multiline -> fn (src: *byte, i: int, dest: *byte, max: int) int {
-    let n: int = 0;
+const read_quoted_multiline -> fn (src: *byte, i: i64, dest: *byte, max: i64) i64 {
+    let n: i64 = 0;
     loop (src[i] != '\0' && n < max - 1) {
         if (src[i] == '"' && src[i + 1] == '"' && src[i + 2] == '"') {
             i = i + 3;
@@ -102,8 +102,8 @@ const read_quoted_multiline -> fn (src: *byte, i: int, dest: *byte, max: int) in
 }
 
 /// Read an unquoted value (until newline or comment).
-const read_unquoted -> fn (src: *byte, i: int, dest: *byte, max: int) int {
-    let n: int = 0;
+const read_unquoted -> fn (src: *byte, i: i64, dest: *byte, max: i64) i64 {
+    let n: i64 = 0;
     loop (src[i] != '\n' && src[i] != '\0' && src[i] != '#' && n < max - 1) {
         dest[n] = src[i];
         n = n + 1;
@@ -118,7 +118,7 @@ const read_unquoted -> fn (src: *byte, i: int, dest: *byte, max: int) int {
 
 /// Read a value (quoted, multiline, or unquoted) into dest, advancing past
 /// the opening `"` / `"""` if quoted. Returns the next position after the value.
-const read_toml_value -> fn (src: *byte, i: int, dest: *byte, max: int) int {
+const read_toml_value -> fn (src: *byte, i: i64, dest: *byte, max: i64) i64 {
     if (src[i] == '"' && src[i + 1] == '"' && src[i + 2] == '"') {
         i = i + 3;
         i = read_quoted_multiline(src, i, dest, max);
@@ -132,9 +132,9 @@ const read_toml_value -> fn (src: *byte, i: int, dest: *byte, max: int) int {
 }
 
 /// Read an integer value from src at position i.
-const read_int -> fn (src: *byte, i: int, out_val: *int) int {
+const read_int -> fn (src: *byte, i: i64, out_val: *i64) i64 {
     let buf: [byte; 32];
-    let n: int = 0;
+    let n: i64 = 0;
     loop (src[i] >= '0' && src[i] <= '9' && n < 31) {
         buf[n] = src[i];
         n = n + 1;
@@ -148,7 +148,7 @@ const read_int -> fn (src: *byte, i: int, out_val: *int) int {
 /// Duplicate a stack buffer into heap memory (returns owned *byte).
 #returns_ownership
 const heap_dup -> fn (src: *byte) *byte {
-    let len: int = string::strlen(src);
+    let len: i64 = string::strlen(src);
     let out: *byte = cast<*byte>(alloc((len + 1) * sizeof<byte>));
     mem::memcpy(cast<*void>(out), cast<*void>(src), len);
     out[len] = '\0';
@@ -159,7 +159,7 @@ const heap_dup -> fn (src: *byte) *byte {
 /// Entries ending in ".lx" are stored as-is; every other entry is treated as
 /// a directory and expanded into its .lx files via fs::scan_directory.
 /// Returns the index just past the closing ']'.
-const read_path_array -> fn (src: *byte, i: int, dest: **byte, count: *int, max: int) int {
+const read_path_array -> fn (src: *byte, i: i64, dest: **byte, count: *i64, max: i64) i64 {
     if (src[i] != '[') return i;
     i = i + 1;
     i = skip_ws(src, i);
@@ -169,7 +169,7 @@ const read_path_array -> fn (src: *byte, i: int, dest: **byte, count: *int, max:
             let val_buf: [byte; 256];
             i = read_quoted(src, i, cast<*byte>(&val_buf), 256);
             let path: *byte = cast<*byte>(&val_buf);
-            let path_len: int = string::strlen(path);
+            let path_len: i64 = string::strlen(path);
             if (path_len > 3 &&
                 path[path_len - 3] == '.' &&
                 path[path_len - 2] == 'l' &&
@@ -179,9 +179,9 @@ const read_path_array -> fn (src: *byte, i: int, dest: **byte, count: *int, max:
                     *count = *count + 1;
                 }
             } else {
-                let file_count: int = 0;
+                let file_count: i64 = 0;
                 let files: **byte = fs::scan_directory(path, &file_count);
-                loop [j: int = 0](j < file_count && *count < max) : (j = j + 1) {
+                loop [j: i64 = 0](j < file_count && *count < max) : (j = j + 1) {
                     dest[*count] = files[j];
                     *count = *count + 1;
                 }
@@ -201,14 +201,14 @@ const read_path_array -> fn (src: *byte, i: int, dest: **byte, count: *int, max:
 /// Parse a TOML array of key => "command" run entries into global arrays.
 /// Keys may be bare names or numbers; values are quoted command strings.
 /// Returns the index just past the closing ']'.
-const read_run_args_array -> fn (src: *byte, i: int) int {
+const read_run_args_array -> fn (src: *byte, i: i64) i64 {
     if (src[i] != '[') return i;
     i = i + 1;
     i = skip_ws(src, i);
     let key_buf: [byte; 64];
     let val_buf: [byte; 1024];
     loop (src[i] != ']' && src[i] != '\0') {
-        let key_len: int = 0;
+        let key_len: i64 = 0;
         loop (src[i] != '\0' && src[i] != ']' && src[i] != ',' &&
               src[i] != '\n' && src[i] != '\r' && src[i] != '=' &&
               src[i] != '>' && src[i] != ' ' && src[i] != '\t' &&
@@ -269,13 +269,13 @@ pub const parse_toml -> fn () TomlConfig {
 
     cfg.found = 1;
 
-    let i: int = 0;
-    let in_project: int = 0;
-    let in_dependency: int = 0;
-    let in_output:  int = 0;
-    let in_build:   int = 0;
-    let in_run:     int = 0;
-    let in_test:    int = 0;
+    let i: i64 = 0;
+    let in_project: i64 = 0;
+    let in_dependency: i64 = 0;
+    let in_output:  i64 = 0;
+    let in_build:   i64 = 0;
+    let in_run:     i64 = 0;
+    let in_test:    i64 = 0;
 
     g_dep_count = 0;
     g_exclude_count = 0;
@@ -424,96 +424,96 @@ pub const free_toml_config -> fn (cfg: *TomlConfig) void {
     if (cfg.build_flags != cast<*byte>(0)) { free(cfg.build_flags); cfg.build_flags = cast<*byte>(0); }
 }
 
-pub const get_dep_count -> fn () int {
+pub const get_dep_count -> fn () i64 {
     return g_dep_count;
 }
 
-pub const get_dep_path -> fn (i: int) *byte {
+pub const get_dep_path -> fn (i: i64) *byte {
     if (i >= 0 && i < g_dep_count) return g_dep_paths[i];
     return cast<*byte>(0);
 }
 
 pub const free_dep_paths -> fn () void {
-    loop [i: int = 0](i < g_dep_count) : (i = i + 1) {
+    loop [i: i64 = 0](i < g_dep_count) : (i = i + 1) {
         free(g_dep_paths[i]);
         g_dep_paths[i] = cast<*byte>(0);
     }
     g_dep_count = 0;
 }
 
-pub const get_exclude_count -> fn () int {
+pub const get_exclude_count -> fn () i64 {
     return g_exclude_count;
 }
 
-pub const get_exclude_path -> fn (i: int) *byte {
+pub const get_exclude_path -> fn (i: i64) *byte {
     if (i >= 0 && i < g_exclude_count) return g_exclude_paths[i];
     return cast<*byte>(0);
 }
 
 pub const free_exclude_paths -> fn () void {
-    loop [i: int = 0](i < g_exclude_count) : (i = i + 1) {
+    loop [i: i64 = 0](i < g_exclude_count) : (i = i + 1) {
         free(g_exclude_paths[i]);
         g_exclude_paths[i] = cast<*byte>(0);
     }
     g_exclude_count = 0;
 }
 
-pub const get_test_valid_count -> fn () int {
+pub const get_test_valid_count -> fn () i64 {
     return g_test_valid_count;
 }
 
-pub const get_test_valid_path -> fn (i: int) *byte {
+pub const get_test_valid_path -> fn (i: i64) *byte {
     if (i >= 0 && i < g_test_valid_count) return g_test_valid_paths[i];
     return cast<*byte>(0);
 }
 
-pub const get_test_error_count -> fn () int {
+pub const get_test_error_count -> fn () i64 {
     return g_test_error_count;
 }
 
-pub const get_test_error_path -> fn (i: int) *byte {
+pub const get_test_error_path -> fn (i: i64) *byte {
     if (i >= 0 && i < g_test_error_count) return g_test_error_paths[i];
     return cast<*byte>(0);
 }
 
 pub const free_test_paths -> fn () void {
-    loop [i: int = 0](i < g_test_valid_count) : (i = i + 1) {
+    loop [i: i64 = 0](i < g_test_valid_count) : (i = i + 1) {
         free(g_test_valid_paths[i]);
         g_test_valid_paths[i] = cast<*byte>(0);
     }
     g_test_valid_count = 0;
 
-    loop [i: int = 0](i < g_test_error_count) : (i = i + 1) {
+    loop [i: i64 = 0](i < g_test_error_count) : (i = i + 1) {
         free(g_test_error_paths[i]);
         g_test_error_paths[i] = cast<*byte>(0);
     }
     g_test_error_count = 0;
 }
 
-pub const get_run_count -> fn () int {
+pub const get_run_count -> fn () i64 {
     return g_run_count;
 }
 
-pub const get_run_key -> fn (i: int) *byte {
+pub const get_run_key -> fn (i: i64) *byte {
     if (i >= 0 && i < g_run_count) return g_run_keys[i];
     return cast<*byte>(0);
 }
 
-pub const get_run_command -> fn (i: int) *byte {
+pub const get_run_command -> fn (i: i64) *byte {
     if (i >= 0 && i < g_run_count) return g_run_commands[i];
     return cast<*byte>(0);
 }
 
 /// Find the index of the run entry whose key matches name, or -1.
-pub const find_run_index -> fn (name: *byte) int {
-    loop [i: int = 0](i < g_run_count) : (i = i + 1) {
+pub const find_run_index -> fn (name: *byte) i64 {
+    loop [i: i64 = 0](i < g_run_count) : (i = i + 1) {
         if (string::strcmp(g_run_keys[i], name) == 0) return i;
     }
     return -1;
 }
 
 pub const free_run_commands -> fn () void {
-    loop [i: int = 0](i < g_run_count) : (i = i + 1) {
+    loop [i: i64 = 0](i < g_run_count) : (i = i + 1) {
         free(g_run_keys[i]);
         g_run_keys[i] = cast<*byte>(0);
         free(g_run_commands[i]);

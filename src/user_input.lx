@@ -1,7 +1,7 @@
 @module "user_input"
 
-const read_line -> fn (buffer: *byte, max_len: int) void {
-    let i: int = 0;
+const read_line -> fn (buffer: *byte, max_len: i64) void {
+    let i: i64 = 0;
     loop (i < max_len - 1) {
         let c: byte = input<byte>("");
         if (c == '\n' || c == '\0') break;
@@ -11,7 +11,7 @@ const read_line -> fn (buffer: *byte, max_len: int) void {
     buffer[i] = '\0';
 }
 
-pub const get_user_input -> fn (prompt: *byte, default_value: *byte, buffer: *byte, buffer_size: int) *byte {
+pub const get_user_input -> fn (prompt: *byte, default_value: *byte, buffer: *byte, buffer_size: i64) *byte {
     output(prompt);
     read_line(buffer, buffer_size);
 

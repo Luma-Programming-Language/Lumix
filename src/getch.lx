@@ -5,26 +5,26 @@
 @os {
     "windows64" -> {
         #dll_import("kernel32.dll", callconv: "stdcall")
-        const GetStdHandle -> fn (nStdHandle: int) int;
+        const GetStdHandle -> fn (nStdHandle: i64) i64;
         #dll_import("kernel32.dll", callconv: "stdcall")
         const ReadFile -> fn (
-            hFile: int,
+            hFile: i64,
             lpBuffer: *void,
-            nNumberOfBytesToRead: int,
-            lpNumberOfBytesRead: *int,
+            nNumberOfBytesToRead: i64,
+            lpNumberOfBytesRead: *i64,
             lpOverlapped: *void
-        ) int;
+        ) i64;
     }
 }
 
 pub const getch -> fn () byte {
-    let c: int = 0;
+    let c: i64 = 0;
     @os {
         "linux" -> { __syscall__(0, 0, &c, 1); }
         "macos" -> { __syscall__(3, 0, &c, 1); }
         "windows64" -> {
-            let handle: int = GetStdHandle(-10);
-            let bytes_read: int = 0;
+            let handle: i64 = GetStdHandle(-10);
+            let bytes_read: i64 = 0;
             ReadFile(handle, cast<*void>(&c), 1, &bytes_read, cast<*void>(0));
         }
     }
@@ -32,7 +32,7 @@ pub const getch -> fn () byte {
 }
 
 // Get yes/no answer
-pub const get_yes_no -> fn (prompt: *byte) int {
+pub const get_yes_no -> fn (prompt: *byte) i64 {
     io::print("%s (y/n): ", [io::str_arg(prompt)]);
 
     let c: byte = getch();

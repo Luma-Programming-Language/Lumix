@@ -20,54 +20,54 @@
     }
 }
 
-const MAX_CMD_LEN: int = 512;
+const MAX_CMD_LEN: i64 = 512;
 
-pub const MAX_FILES: int = 500;
+pub const MAX_FILES: i64 = 500;
 
 const execute_find_command -> fn (path: *byte) void {
     let scan_cmd: *byte = cast<*byte>(alloc(MAX_CMD_LEN));
     defer { free(scan_cmd); }
 
-    let i: int = 0;
+    let i: i64 = 0;
 
     @os {
         "linux" -> {
             let find_prefix: *byte = "find ";
-            let prefix_len: int = string::strlen(find_prefix);
+            let prefix_len: i64 = string::strlen(find_prefix);
             mem::memcpy(cast<*void>(scan_cmd), cast<*void>(find_prefix), prefix_len);
             i = prefix_len;
 
-            let path_len: int = string::strlen(path);
+            let path_len: i64 = string::strlen(path);
             mem::memcpy(cast<*void>(&scan_cmd[i]), cast<*void>(path), path_len);
             i = i + path_len;
 
             let suffix: *byte = " -name '*.lx' -type f 2>/dev/null > ";
-            let suffix_len: int = string::strlen(suffix);
+            let suffix_len: i64 = string::strlen(suffix);
             mem::memcpy(cast<*void>(&scan_cmd[i]), cast<*void>(suffix), suffix_len);
             i = i + suffix_len;
         }
         "macos" -> {
             let find_prefix: *byte = "find ";
-            let prefix_len: int = string::strlen(find_prefix);
+            let prefix_len: i64 = string::strlen(find_prefix);
             mem::memcpy(cast<*void>(scan_cmd), cast<*void>(find_prefix), prefix_len);
             i = prefix_len;
 
-            let path_len: int = string::strlen(path);
+            let path_len: i64 = string::strlen(path);
             mem::memcpy(cast<*void>(&scan_cmd[i]), cast<*void>(path), path_len);
             i = i + path_len;
 
             let suffix: *byte = " -name '*.lx' -type f 2>/dev/null > ";
-            let suffix_len: int = string::strlen(suffix);
+            let suffix_len: i64 = string::strlen(suffix);
             mem::memcpy(cast<*void>(&scan_cmd[i]), cast<*void>(suffix), suffix_len);
             i = i + suffix_len;
         }
         "windows64" -> {
             let dir_prefix: *byte = "dir /s /b ";
-            let prefix_len: int = string::strlen(dir_prefix);
+            let prefix_len: i64 = string::strlen(dir_prefix);
             mem::memcpy(cast<*void>(scan_cmd), cast<*void>(dir_prefix), prefix_len);
             i = prefix_len;
 
-            let path_len: int = string::strlen(path);
+            let path_len: i64 = string::strlen(path);
             mem::memcpy(cast<*void>(&scan_cmd[i]), cast<*void>(path), path_len);
             i = i + path_len;
 
@@ -80,13 +80,13 @@ const execute_find_command -> fn (path: *byte) void {
             scan_cmd[i] = 'x'; i = i + 1;
 
             let suffix: *byte = " > ";
-            let suffix_len: int = string::strlen(suffix);
+            let suffix_len: i64 = string::strlen(suffix);
             mem::memcpy(cast<*void>(&scan_cmd[i]), cast<*void>(suffix), suffix_len);
             i = i + suffix_len;
         }
     }
 
-    let temp_len: int = string::strlen(TEMP_FILES_LIST);
+    let temp_len: i64 = string::strlen(TEMP_FILES_LIST);
     mem::memcpy(cast<*void>(&scan_cmd[i]), cast<*void>(TEMP_FILES_LIST), temp_len);
     i = i + temp_len;
 
@@ -100,19 +100,19 @@ const fallback_ls_scan -> fn (path: *byte) void {
             let cmd: *byte = cast<*byte>(alloc(MAX_CMD_LEN));
             defer { free(cmd); }
 
-            let path_len: int = string::strlen(path);
+            let path_len: i64 = string::strlen(path);
 
             system("rm -f /tmp/luma_files.txt 2>/dev/null");
 
-            let i: int = 0;
+            let i: i64 = 0;
             let ls_prefix: *byte = "ls ";
-            let prefix_len: int = string::strlen(ls_prefix);
+            let prefix_len: i64 = string::strlen(ls_prefix);
             mem::memcpy(cast<*void>(cmd), cast<*void>(ls_prefix), prefix_len);
             i = prefix_len;
             mem::memcpy(cast<*void>(&cmd[i]), cast<*void>(path), path_len);
             i = i + path_len;
             let suffix1: *byte = "/*.lx 2>/dev/null > /tmp/luma_files.txt";
-            let s1_len: int = string::strlen(suffix1);
+            let s1_len: i64 = string::strlen(suffix1);
             mem::memcpy(cast<*void>(&cmd[i]), cast<*void>(suffix1), s1_len);
             cmd[i + s1_len] = '\0';
             system(cmd);
@@ -121,7 +121,7 @@ const fallback_ls_scan -> fn (path: *byte) void {
             mem::memcpy(cast<*void>(&cmd[i]), cast<*void>(path), path_len);
             i = i + path_len;
             let suffix2: *byte = "/*/*.lx 2>/dev/null >> /tmp/luma_files.txt";
-            let s2_len: int = string::strlen(suffix2);
+            let s2_len: i64 = string::strlen(suffix2);
             mem::memcpy(cast<*void>(&cmd[i]), cast<*void>(suffix2), s2_len);
             cmd[i + s2_len] = '\0';
             system(cmd);
@@ -130,19 +130,19 @@ const fallback_ls_scan -> fn (path: *byte) void {
             let cmd: *byte = cast<*byte>(alloc(MAX_CMD_LEN));
             defer { free(cmd); }
 
-            let path_len: int = string::strlen(path);
+            let path_len: i64 = string::strlen(path);
 
             system("rm -f /tmp/luma_files.txt 2>/dev/null");
 
-            let i: int = 0;
+            let i: i64 = 0;
             let ls_prefix: *byte = "ls ";
-            let prefix_len: int = string::strlen(ls_prefix);
+            let prefix_len: i64 = string::strlen(ls_prefix);
             mem::memcpy(cast<*void>(cmd), cast<*void>(ls_prefix), prefix_len);
             i = prefix_len;
             mem::memcpy(cast<*void>(&cmd[i]), cast<*void>(path), path_len);
             i = i + path_len;
             let suffix1: *byte = "/*.lx 2>/dev/null > /tmp/luma_files.txt";
-            let s1_len: int = string::strlen(suffix1);
+            let s1_len: i64 = string::strlen(suffix1);
             mem::memcpy(cast<*void>(&cmd[i]), cast<*void>(suffix1), s1_len);
             cmd[i + s1_len] = '\0';
             system(cmd);
@@ -151,7 +151,7 @@ const fallback_ls_scan -> fn (path: *byte) void {
             mem::memcpy(cast<*void>(&cmd[i]), cast<*void>(path), path_len);
             i = i + path_len;
             let suffix2: *byte = "/*/*.lx 2>/dev/null >> /tmp/luma_files.txt";
-            let s2_len: int = string::strlen(suffix2);
+            let s2_len: i64 = string::strlen(suffix2);
             mem::memcpy(cast<*void>(&cmd[i]), cast<*void>(suffix2), s2_len);
             cmd[i + s2_len] = '\0';
             system(cmd);
@@ -162,10 +162,10 @@ const fallback_ls_scan -> fn (path: *byte) void {
             system("del /f /q luma_files.txt 2>nul 1>nul");
             let cmd: *byte = cast<*byte>(alloc(MAX_CMD_LEN));
             defer { free(cmd); }
-            let path_len: int = string::strlen(path);
-            let i: int = 0;
+            let path_len: i64 = string::strlen(path);
+            let i: i64 = 0;
             let dir_prefix: *byte = "dir /b ";
-            let prefix_len: int = string::strlen(dir_prefix);
+            let prefix_len: i64 = string::strlen(dir_prefix);
             mem::memcpy(cast<*void>(cmd), cast<*void>(dir_prefix), prefix_len);
             i = prefix_len;
             mem::memcpy(cast<*void>(&cmd[i]), cast<*void>(path), path_len);
@@ -178,7 +178,7 @@ const fallback_ls_scan -> fn (path: *byte) void {
             cmd[i] = 'l'; i = i + 1;
             cmd[i] = 'x'; i = i + 1;
             let suffix: *byte = " > luma_files.txt";
-            let s_len: int = string::strlen(suffix);
+            let s_len: i64 = string::strlen(suffix);
             mem::memcpy(cast<*void>(&cmd[i]), cast<*void>(suffix), s_len);
             cmd[i + s_len] = '\0';
             system(cmd);
@@ -187,7 +187,7 @@ const fallback_ls_scan -> fn (path: *byte) void {
 }
 
 #returns_ownership
-pub const scan_directory -> fn (path: *byte, out_count: *int) **byte {
+pub const scan_directory -> fn (path: *byte, out_count: *i64) **byte {
     let files: **byte = cast<**byte>(alloc(MAX_FILES * sizeof<*byte>));
     *out_count = 0;
 
@@ -210,8 +210,8 @@ pub const scan_directory -> fn (path: *byte, out_count: *int) **byte {
         }
     }
 
-    let i: int = 0;
-    let line_start: int = 0;
+    let i: i64 = 0;
+    let line_start: i64 = 0;
 
     loop (file_list[i] != '\0' && *out_count < MAX_FILES) {
         if (file_list[i] == '\n') {

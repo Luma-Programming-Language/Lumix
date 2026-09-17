@@ -436,9 +436,9 @@ const BuildConfig -> struct {
     scan_path:     *byte,   // Directory to scan for .lx files
     binary_dir:    *byte,   // Output directory for the binary (optional)
     build_flags:   *byte,   // Extra compiler flags from lumix.toml
-    optimize:      int,     // Optimization level (reserved)
-    debug_symbols: int,     // Debug symbols flag (reserved)
-    verbose:       int      // Verbose output (always 1)
+    optimize:      i64,     // Optimization level (reserved)
+    debug_symbols: i64,     // Debug symbols flag (reserved)
+    verbose:       i64      // Verbose output (always 1)
 };
 ```
 

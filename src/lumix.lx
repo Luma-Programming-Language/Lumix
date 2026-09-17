@@ -13,7 +13,7 @@
 @use "getch" as gc
 @use "toml" as toml
 
-const MAX_CMD_LEN: int = 512;
+const MAX_CMD_LEN: i64 = 512;
 
 const BuildConfig -> struct {
     entry_point:   *byte,
@@ -22,14 +22,14 @@ const BuildConfig -> struct {
     scan_path:     *byte,
     binary_dir:    *byte,
     build_flags:   *byte,
-    optimize:      int,
-    debug_symbols: int,
-    verbose:       int
+    optimize:      i64,
+    debug_symbols: i64,
+    verbose:       i64
 };
 
 const NULL_BYTE: string::Slice = string::Slice { ptr: "", len: 0 };
-const STD_PREFIX_LEN: int = 4;
-const MAX_TEST_FILES: int = 500;
+const STD_PREFIX_LEN: i64 = 4;
+const MAX_TEST_FILES: i64 = 500;
 
 @os {
     "linux" -> {
@@ -64,17 +64,17 @@ const MAX_TEST_FILES: int = 500;
 let g_dependencies: [**byte; 100];
 let g_module_names: [*byte; 100];
 let g_file_paths: [*byte; 100];
-let g_dep_counts: [int; 100];
-let g_graph_size: int = 0;
+let g_dep_counts: [i64; 100];
+let g_graph_size: i64 = 0;
 
 let g_converted_paths: [*byte; 200];
-let g_converted_count: int = 0;
+let g_converted_count: i64 = 0;
 
 /// Join dir and name with a platform-appropriate separator.
 #returns_ownership
 const join_path -> fn (dir: *byte, name: *byte, out: **byte) void {
-    let dir_len: int = string::strlen(dir);
-    let name_len: int = string::strlen(name);
+    let dir_len: i64 = string::strlen(dir);
+    let name_len: i64 = string::strlen(name);
     let full: *byte = cast<*byte>(alloc((dir_len + 1 + name_len + 1) * sizeof<byte>));
     mem::memcpy(cast<*void>(full), cast<*void>(dir), dir_len);
     @os {
@@ -99,10 +99,10 @@ const print_field -> fn (label: *byte, val: *byte, default_str: *byte) void {
 
 #returns_ownership
 const find_entry_point -> fn (scan_path: *byte) *byte {
-    let file_count: int = 0;
+    let file_count: i64 = 0;
     let files: **byte = fs::scan_directory(scan_path, &file_count);
     defer {
-        loop [i: int = 0](i < file_count) : (i = i + 1) {
+        loop [i: i64 = 0](i < file_count) : (i = i + 1) {
             free(files[i]);
         }
         free(files);
@@ -112,9 +112,9 @@ const find_entry_point -> fn (scan_path: *byte) *byte {
 
     let entry_point: *byte = cast<*byte>(0);
 
-    loop [i: int = 0](i < file_count) : (i = i + 1) {
+    loop [i: i64 = 0](i < file_count) : (i = i + 1) {
         if (util::contains_main_function(files[i]) == 1) {
-            let len: int = string::strlen(files[i]);
+            let len: i64 = string::strlen(files[i]);
             entry_point = cast<*byte>(alloc((len + 1) * sizeof<byte>));
             mem::memcpy(cast<*void>(entry_point), cast<*void>(files[i]), len);
             entry_point[len] = '\0';
@@ -125,34 +125,34 @@ const find_entry_point -> fn (scan_path: *byte) *byte {
     return entry_point;
 }
 
-const is_excluded -> fn (filepath: *byte) int {
-    let exclude_count: int = toml::get_exclude_count();
-    loop [i: int = 0](i < exclude_count) : (i = i + 1) {
+const is_excluded -> fn (filepath: *byte) i64 {
+    let exclude_count: i64 = toml::get_exclude_count();
+    loop [i: i64 = 0](i < exclude_count) : (i = i + 1) {
         if (string::strcmp(toml::get_exclude_path(i), filepath) == 0) return 1;
     }
     return 0;
 }
 
-const build_dep_graph -> fn (scan_path: *byte) int {
+const build_dep_graph -> fn (scan_path: *byte) i64 {
     g_graph_size = 0;
 
-    let file_count: int = 0;
+    let file_count: i64 = 0;
     let files: **byte = fs::scan_directory(scan_path, &file_count);
 
     defer {
-        loop [i: int = g_graph_size](i < file_count) : (i = i + 1) {
+        loop [i: i64 = g_graph_size](i < file_count) : (i = i + 1) {
             free(files[i]);
         }
         free(files);
     }
 
     if (file_count == 0) {
-        io::print_err("\nError: No .lx files found in directory '%s'\n", [cast<int>(scan_path)]);
-        io::print_err("Make sure you're running this from a directory containing .lx files\n", [0]);
+        io::print_err("\nError: No .lx files found in directory '%s'\n", [cast<i64>(scan_path)]);
+        io::print_err("Make sure you're running this from a directory containing .lx files\n", [cast<i64>(0)]);
         return 0;
     }
 
-    loop [i: int = 0](i < file_count && g_graph_size < fs::MAX_FILES) : (i = i + 1) {
+    loop [i: i64 = 0](i < file_count && g_graph_size < fs::MAX_FILES) : (i = i + 1) {
         let filepath: *byte = files[i];
 
         if (is_excluded(filepath) == 1) {
@@ -168,7 +168,7 @@ const build_dep_graph -> fn (scan_path: *byte) int {
             continue;
         }
 
-        let dep_count: int = 0;
+        let dep_count: i64 = 0;
 
         g_file_paths[g_graph_size] = filepath;
         g_dependencies[g_graph_size] = parser::find_imports(filepath, &dep_count);
@@ -177,13 +177,13 @@ const build_dep_graph -> fn (scan_path: *byte) int {
         g_graph_size = g_graph_size + 1;
     }
 
-    let toml_dep_count: int = toml::get_dep_count();
-    loop [k: int = 0](k < toml_dep_count && g_graph_size < fs::MAX_FILES) : (k = k + 1) {
+    let toml_dep_count: i64 = toml::get_dep_count();
+    loop [k: i64 = 0](k < toml_dep_count && g_graph_size < fs::MAX_FILES) : (k = k + 1) {
         let dep_path: *byte = toml::get_dep_path(k);
 
         // Skip if already in the graph
-        let already_added: int = 0;
-        loop [j: int = 0](j < g_graph_size) : (j = j + 1) {
+        let already_added: i64 = 0;
+        loop [j: i64 = 0](j < g_graph_size) : (j = j + 1) {
             if (string::strcmp(g_file_paths[j], dep_path) == 0) {
                 already_added = 1;
                 break;
@@ -191,12 +191,12 @@ const build_dep_graph -> fn (scan_path: *byte) int {
         }
         if (already_added == 1) continue;
 
-        let path_len: int = string::strlen(dep_path);
+        let path_len: i64 = string::strlen(dep_path);
         g_file_paths[g_graph_size] = cast<*byte>(alloc((path_len + 1) * sizeof<byte>));
         mem::memcpy(cast<*void>(g_file_paths[g_graph_size]), cast<*void>(dep_path), path_len);
         g_file_paths[g_graph_size][path_len] = '\0';
 
-        let import_count: int = 0;
+        let import_count: i64 = 0;
 
         g_module_names[g_graph_size] = module::extract_module_name(g_file_paths[g_graph_size]);
         g_dependencies[g_graph_size] = parser::find_imports(g_file_paths[g_graph_size], &import_count);
@@ -208,8 +208,8 @@ const build_dep_graph -> fn (scan_path: *byte) int {
     return g_graph_size;
 }
 
-const has_dep -> fn (slice_ptr: *string::Slice, slice_count: int, dep_path: *byte) int {
-    loop [i: int = 0](i < slice_count) : (i = i + 1) {
+const has_dep -> fn (slice_ptr: *string::Slice, slice_count: i64, dep_path: *byte) i64 {
+    loop [i: i64 = 0](i < slice_count) : (i = i + 1) {
         if (string::strcmp(slice_ptr[i].ptr, dep_path) == 0) return 1;
     }
     return 0;
@@ -217,8 +217,8 @@ const has_dep -> fn (slice_ptr: *string::Slice, slice_count: int, dep_path: *byt
 
 #returns_ownership
 const convert_std_module_path -> fn (dep_name: *byte) *byte {
-    let dep_len: int = string::strlen(dep_name);
-    let total_len: int = STD_PREFIX_LEN + (dep_len - STD_PREFIX_LEN) + module::FILE_EXT_LEN + 1;
+    let dep_len: i64 = string::strlen(dep_name);
+    let total_len: i64 = STD_PREFIX_LEN + (dep_len - STD_PREFIX_LEN) + module::FILE_EXT_LEN + 1;
 
     let dep_path: *byte = cast<*byte>(alloc(total_len * sizeof<byte>));
 
@@ -231,7 +231,7 @@ const convert_std_module_path -> fn (dep_name: *byte) *byte {
                 cast<*void>(&dep_name[STD_PREFIX_LEN]),
                 dep_len - STD_PREFIX_LEN);
 
-    let base_len: int = STD_PREFIX_LEN + (dep_len - STD_PREFIX_LEN);
+    let base_len: i64 = STD_PREFIX_LEN + (dep_len - STD_PREFIX_LEN);
     dep_path[base_len + 0] = '.';
     dep_path[base_len + 1] = 'l';
     dep_path[base_len + 2] = 'x';
@@ -241,9 +241,9 @@ const convert_std_module_path -> fn (dep_name: *byte) *byte {
 }
 
 #returns_ownership
-const add_dependencies_to_cmd -> fn (slice: *string::Slice, slice_count: *int, config: *BuildConfig) void {
-    loop [i: int = 0](i < g_graph_size) : (i = i + 1) {
-        loop [j: int = 0](j < g_dep_counts[i]) : (j = j + 1) {
+const add_dependencies_to_cmd -> fn (slice: *string::Slice, slice_count: *i64, config: *BuildConfig) void {
+    loop [i: i64 = 0](i < g_graph_size) : (i = i + 1) {
+        loop [j: i64 = 0](j < g_dep_counts[i]) : (j = j + 1) {
             let dep_name: **byte = g_dependencies[i];
             let dep_path: *byte;
 
@@ -279,7 +279,7 @@ const build_compile_command -> fn (config: *BuildConfig) string::String {
     let slice: *string::Slice = cast<*string::Slice>(alloc(200 * sizeof<string::Slice>));
     defer { free(slice); }
 
-    let slice_count: int = 0;
+    let slice_count: i64 = 0;
 
     slice[slice_count++] = slice.null_terminated_slice("luma ");
     slice[slice_count++] = slice.null_terminated_slice(config.entry_point);
@@ -289,7 +289,7 @@ const build_compile_command -> fn (config: *BuildConfig) string::String {
     add_dependencies_to_cmd(slice, &slice_count, config);
 
     let full_output: *byte;
-    let needs_free_output: int = 0;
+    let needs_free_output: i64 = 0;
 
     if (config.binary_dir != cast<*byte>(0)) {
         join_path(config.binary_dir, config.output_name, &full_output);
@@ -312,7 +312,7 @@ const build_compile_command -> fn (config: *BuildConfig) string::String {
 
     if (needs_free_output == 1) free(full_output);
 
-    loop [i: int = 0](i < g_converted_count) : (i = i + 1) {
+    loop [i: i64 = 0](i < g_converted_count) : (i = i + 1) {
         free(g_converted_paths[i]);
         g_converted_paths[i] = cast<*byte>(0);
     }
@@ -322,8 +322,8 @@ const build_compile_command -> fn (config: *BuildConfig) string::String {
 }
 
 const free_dep_graph -> fn () void {
-    loop [i: int = 0](i < g_graph_size) : (i = i + 1) {
-        loop [j: int = 0](j < g_dep_counts[i]) : (j = j + 1) {
+    loop [i: i64 = 0](i < g_graph_size) : (i = i + 1) {
+        loop [j: i64 = 0](j < g_dep_counts[i]) : (j = j + 1) {
             let deps: **byte = g_dependencies[i];
             free(deps[j]);
         }
@@ -334,14 +334,14 @@ const free_dep_graph -> fn () void {
     g_graph_size = 0;
 }
 
-const build -> fn (config: *BuildConfig) int {
+const build -> fn (config: *BuildConfig) i64 {
     io::print("\n=== Building Luma Project ===\n", [io::NULL_FORMAT_ARG]);
     io::print("Entry point: %s\n", [io::str_arg(config.entry_point)]);
     io::print("Output name: %s\n", [io::str_arg(config.output_name)]);
 
     if (util::file_exists(config.entry_point) == 0) {
         io::print_err("\nError: Entry point file '%s' does not exist\n",
-                     [cast<int>(config.entry_point)]);
+                     [cast<i64>(config.entry_point)]);
         return 1;
     }
 
@@ -354,7 +354,7 @@ const build -> fn (config: *BuildConfig) int {
                                                  io::str_arg(cmd_str.slice.ptr),
                                                  io::str_arg(term::RESET)]);
 
-    let compile_result: int = system(cmd_str.slice.ptr);
+    let compile_result: i64 = system(cmd_str.slice.ptr);
     if (compile_result != 0) {
         io::print_err("\nError: Build failed with exit code %d\n\n", [compile_result]);
         free_dep_graph();
@@ -373,10 +373,10 @@ const build -> fn (config: *BuildConfig) int {
     return 0;
 }
 
-const clean -> fn () int {
+const clean -> fn () i64 {
     io::print("\n=== Cleaning Build Artifacts ===\n", [io::NULL_FORMAT_ARG]);
 
-    let confirm: int = gc::get_yes_no("Are you sure you want to clean build artifacts?");
+    let confirm: i64 = gc::get_yes_no("Are you sure you want to clean build artifacts?");
     if (confirm == 0) {
         io::print("Clean operation cancelled.\n\n", [io::NULL_FORMAT_ARG]);
         return 0;
@@ -392,14 +392,14 @@ const clean -> fn () int {
     return 0;
 }
 
-const show_deps -> fn () int {
+const show_deps -> fn () i64 {
     io::print("\n=== Dependency Tree ===\n", [io::NULL_FORMAT_ARG]);
 
     if (build_dep_graph(".") == 0) return 1;
 
     io::print("\nModule dependencies:\n", [io::NULL_FORMAT_ARG]);
 
-    loop [i: int = 0](i < g_graph_size) : (++i) {
+    loop [i: i64 = 0](i < g_graph_size) : (++i) {
         io::print("\n  %s(%s)%s", [io::str_arg(term::CYAN), io::str_arg(g_module_names[i]),
                                    io::str_arg(term::RESET)]);
 
@@ -409,7 +409,7 @@ const show_deps -> fn () int {
         }
 
         io::print(" depends on:", [io::NULL_FORMAT_ARG]);
-        loop [j: int = 0](j < g_dep_counts[i]) : (j = j + 1) {
+        loop [j: i64 = 0](j < g_dep_counts[i]) : (j = j + 1) {
             let deps: **byte = g_dependencies[i];
             io::print("\n    - %s%s%s", [io::str_arg(term::BRIGHT_RED), io::str_arg(deps[j]),
                                          io::str_arg(term::RESET)]);
@@ -421,11 +421,11 @@ const show_deps -> fn () int {
     return 0;
 }
 
-const init_project -> fn () int {
+const init_project -> fn () i64 {
     io::print("\n=== Initializing Lumix Project ===\n", [io::NULL_FORMAT_ARG]);
 
     if (util::file_exists("lumix.toml") == 1) {
-        let overwrite: int = gc::get_yes_no("lumix.toml already exists. Overwrite?");
+        let overwrite: i64 = gc::get_yes_no("lumix.toml already exists. Overwrite?");
         if (overwrite == 0) {
             io::print("Init cancelled.\n\n", [io::NULL_FORMAT_ARG]);
             return 0;
@@ -475,7 +475,7 @@ const init_project -> fn () int {
     return 0;
 }
 
-const show_config -> fn () int {
+const show_config -> fn () i64 {
     io::print("\n=== Configuration ===\n", [io::NULL_FORMAT_ARG]);
 
     let tcfg: toml::TomlConfig = toml::parse_toml();
@@ -500,10 +500,10 @@ const show_config -> fn () int {
 
     io::print("\n[dependencies]\n", [io::NULL_FORMAT_ARG]);
     io::print("  paths     = ", [io::NULL_FORMAT_ARG]);
-    let dep_count: int = toml::get_dep_count();
+    let dep_count: i64 = toml::get_dep_count();
     if (dep_count > 0) {
         io::print("\n", [io::NULL_FORMAT_ARG]);
-        loop [i: int = 0](i < dep_count) : (i = i + 1) {
+        loop [i: i64 = 0](i < dep_count) : (i = i + 1) {
             io::print("    - %c%s%c\n", [io::byte_arg('"'), io::str_arg(toml::get_dep_path(i)), io::byte_arg('"')]);
         }
     } else {
@@ -512,10 +512,10 @@ const show_config -> fn () int {
 
     io::print("\n[dependencies]\n", [io::NULL_FORMAT_ARG]);
     io::print("  paths     = ", [io::NULL_FORMAT_ARG]);
-    let dep_count: int = toml::get_dep_count();
+    let dep_count: i64 = toml::get_dep_count();
     if (dep_count > 0) {
         io::print("\n", [io::NULL_FORMAT_ARG]);
-        loop [i: int = 0](i < dep_count) : (i = i + 1) {
+        loop [i: i64 = 0](i < dep_count) : (i = i + 1) {
             io::print("    - %c%s%c\n", [io::byte_arg('"'), io::str_arg(toml::get_dep_path(i)), io::byte_arg('"')]);
         }
     } else {
@@ -523,10 +523,10 @@ const show_config -> fn () int {
     }
 
     io::print("  exclude   = ", [io::NULL_FORMAT_ARG]);
-    let excl_count: int = toml::get_exclude_count();
+    let excl_count: i64 = toml::get_exclude_count();
     if (excl_count > 0) {
         io::print("\n", [io::NULL_FORMAT_ARG]);
-        loop [i: int = 0](i < excl_count) : (i = i + 1) {
+        loop [i: i64 = 0](i < excl_count) : (i = i + 1) {
             io::print("    - %c%s%c\n", [io::byte_arg('"'), io::str_arg(toml::get_exclude_path(i)), io::byte_arg('"')]);
         }
     } else {
@@ -534,9 +534,9 @@ const show_config -> fn () int {
     }
 
     io::print("\n[run]\n", [io::NULL_FORMAT_ARG]);
-    let run_n: int = toml::get_run_count();
+    let run_n: i64 = toml::get_run_count();
     if (run_n > 0) {
-        loop [i: int = 0](i < run_n) : (i = i + 1) {
+        loop [i: i64 = 0](i < run_n) : (i = i + 1) {
             io::print("    %s = %c%s%c\n", [io::str_arg(toml::get_run_key(i)),
                                             io::byte_arg('"'),
                                             io::str_arg(toml::get_run_command(i)),
@@ -548,22 +548,22 @@ const show_config -> fn () int {
 
     io::print("\n[test]\n", [io::NULL_FORMAT_ARG]);
 
-    let test_valid_n: int = toml::get_test_valid_count();
+    let test_valid_n: i64 = toml::get_test_valid_count();
     io::print("  valid     = ", [io::NULL_FORMAT_ARG]);
     if (test_valid_n > 0) {
         io::print("\n", [io::NULL_FORMAT_ARG]);
-        loop [i: int = 0](i < test_valid_n) : (i = i + 1) {
+        loop [i: i64 = 0](i < test_valid_n) : (i = i + 1) {
             io::print("    - %c%s%c\n", [io::byte_arg('"'), io::str_arg(toml::get_test_valid_path(i)), io::byte_arg('"')]);
         }
     } else {
         io::print("(none)\n", [io::NULL_FORMAT_ARG]);
     }
 
-    let test_error_n: int = toml::get_test_error_count();
+    let test_error_n: i64 = toml::get_test_error_count();
     io::print("  errors    = ", [io::NULL_FORMAT_ARG]);
     if (test_error_n > 0) {
         io::print("\n", [io::NULL_FORMAT_ARG]);
-        loop [i: int = 0](i < test_error_n) : (i = i + 1) {
+        loop [i: i64 = 0](i < test_error_n) : (i = i + 1) {
             io::print("    - %c%s%c\n", [io::byte_arg('"'), io::str_arg(toml::get_test_error_path(i)), io::byte_arg('"')]);
         }
     } else {
@@ -587,11 +587,11 @@ const show_config -> fn () int {
 /// This turns a multiline command (used for readability) into a single shell line.
 #returns_ownership
 const collapse_ws -> fn (src: *byte) *byte {
-    let len: int = string::strlen(src);
+    let len: i64 = string::strlen(src);
     let out: *byte = cast<*byte>(alloc((len + 1) * sizeof<byte>));
-    let n: int = 0;
-    let in_ws: int = 0;
-    let i: int = 0;
+    let n: i64 = 0;
+    let in_ws: i64 = 0;
+    let i: i64 = 0;
 
     loop (i < len) {
         let c: byte = src[i];
@@ -613,7 +613,7 @@ const collapse_ws -> fn (src: *byte) *byte {
 }
 
 /// Run one selected run entry by index. Returns 0 on success, non-zero on failure.
-const run_one_target -> fn (index: int, default_run: int) int {
+const run_one_target -> fn (index: i64, default_run: i64) i64 {
     let run_key: *byte = toml::get_run_key(index);
     let run_cmd: *byte = toml::get_run_command(index);
 
@@ -627,7 +627,7 @@ const run_one_target -> fn (index: int, default_run: int) int {
     }
     io::print("%s%s%s\n", [io::str_arg(term::RED), io::str_arg(flat_cmd), io::str_arg(term::RESET)]);
 
-    let run_result: int = system(flat_cmd);
+    let run_result: i64 = system(flat_cmd);
 
     if (run_result != 0) {
         io::print_err("Run failed with exit code %d\n\n", [run_result]);
@@ -638,31 +638,31 @@ const run_one_target -> fn (index: int, default_run: int) int {
     return run_result;
 }
 
-const run_binary -> fn (argc: int, argv: **byte) int {
+const run_binary -> fn (argc: i64, argv: **byte) i64 {
     // --- Resolve config ---
     let tcfg: toml::TomlConfig = toml::parse_toml();
     defer { toml::free_toml_config(&tcfg); }
 
-    let run_count: int = toml::get_run_count();
+    let run_count: i64 = toml::get_run_count();
     if (run_count == 0) {
-        io::print_err("\nNo [run] args configured in lumix.toml.\n", [0]);
+        io::print_err("\nNo [run] args configured in lumix.toml.\n", [cast<i64>(0)]);
         return 1;
     }
     defer { toml::free_run_commands(); }
 
     // Collect the requested targets. With no keys given, run the first entry.
-    let target_start: int = 2;
-    let target_count: int = argc - target_start;
-    let all_default: int = 0;
+    let target_start: i64 = 2;
+    let target_count: i64 = argc - target_start;
+    let all_default: i64 = 0;
     if (target_count <= 0) {
         target_count = 1;
         all_default = 1;
     }
 
-    let result: int = 0;
-    loop [k: int = 0](k < target_count) : (k = k + 1) {
-        let index: int;
-        let default_run: int = 0;
+    let result: i64 = 0;
+    loop [k: i64 = 0](k < target_count) : (k = k + 1) {
+        let index: i64;
+        let default_run: i64 = 0;
 
         if (all_default == 1) {
             index = 0;
@@ -671,7 +671,7 @@ const run_binary -> fn (argc: int, argv: **byte) int {
             index = toml::find_run_index(argv[target_start + k]);
             if (index < 0) {
                 io::print("\nUnknown run target '%s'. Available:\n", [io::str_arg(argv[target_start + k])]);
-                loop [i: int = 0](i < run_count) : (i = i + 1) {
+                loop [i: i64 = 0](i < run_count) : (i = i + 1) {
                     io::print("  %s\n", [io::str_arg(toml::get_run_key(i))]);
                 }
                 io::print("\n", [io::NULL_FORMAT_ARG]);
@@ -680,7 +680,7 @@ const run_binary -> fn (argc: int, argv: **byte) int {
             }
         }
 
-        let r: int = run_one_target(index, default_run);
+        let r: i64 = run_one_target(index, default_run);
         if (r != 0) {
             result = r;
             break;
@@ -697,11 +697,11 @@ const run_binary -> fn (argc: int, argv: **byte) int {
 /// When silent is 1 all compiler output is discarded; otherwise it is
 /// captured to TEST_OUT_PATH so failures can show it.
 #returns_ownership
-const make_compile_cmd -> fn (test_path: *byte, silent: int) string::String {
+const make_compile_cmd -> fn (test_path: *byte, silent: i64) string::String {
     let slice: *string::Slice = cast<*string::Slice>(alloc(64 * sizeof<string::Slice>));
     defer { free(slice); }
 
-    let n: int = 0;
+    let n: i64 = 0;
     slice[n++] = slice.null_terminated_slice(TEST_CLEAN_PREFIX);
     slice[n++] = slice.null_terminated_slice("luma ");
     slice[n++] = slice.null_terminated_slice(test_path);
@@ -709,25 +709,25 @@ const make_compile_cmd -> fn (test_path: *byte, silent: int) string::String {
     // Collect the test file's std dependencies for -l.
     let convs: **byte = cast<**byte>(alloc(32 * sizeof<*byte>));
     defer { free(convs); }
-    let conv_n: int = 0;
+    let conv_n: i64 = 0;
 
-    let dep_count: int = 0;
+    let dep_count: i64 = 0;
     let deps: **byte = parser::find_imports(test_path, &dep_count);
     defer {
-        loop [i: int = 0](i < dep_count) : (i = i + 1) {
+        loop [i: i64 = 0](i < dep_count) : (i = i + 1) {
             free(deps[i]);
         }
         free(deps);
     }
 
-    loop [i: int = 0](i < dep_count && n < 58) : (i = i + 1) {
+    loop [i: i64 = 0](i < dep_count && n < 58) : (i = i + 1) {
         if (string::strncmp(deps[i], "std_", STD_PREFIX_LEN) != 0) continue;
 
         let std_path: *byte = convert_std_module_path(deps[i]);
 
         // Skip duplicates.
-        let dup: int = 0;
-        loop [j: int = 0](j < conv_n) : (j = j + 1) {
+        let dup: i64 = 0;
+        loop [j: i64 = 0](j < conv_n) : (j = j + 1) {
             if (string::strcmp(convs[j], std_path) == 0) dup = 1;
         }
         if (dup == 1) {
@@ -758,7 +758,7 @@ const make_compile_cmd -> fn (test_path: *byte, silent: int) string::String {
     let cmd_str: string::String;
     cmd_str = cmd_str.concat_strs(slice, n);
 
-    loop [i: int = 0](i < conv_n) : (i = i + 1) {
+    loop [i: i64 = 0](i < conv_n) : (i = i + 1) {
         free(convs[i]);
     }
 
@@ -766,9 +766,9 @@ const make_compile_cmd -> fn (test_path: *byte, silent: int) string::String {
 }
 
 /// Execute the compiled test binary with its output captured to TEST_OUT_PATH.
-const run_test_binary -> fn () int {
-    let bin_len: int = string::strlen(TEST_BIN_PATH);
-    let cap_len: int = string::strlen(TEST_CAPTURE);
+const run_test_binary -> fn () i64 {
+    let bin_len: i64 = string::strlen(TEST_BIN_PATH);
+    let cap_len: i64 = string::strlen(TEST_CAPTURE);
 
     let cmd: *byte = cast<*byte>(alloc((bin_len + cap_len + 1) * sizeof<byte>));
     defer { free(cmd); }
@@ -792,18 +792,18 @@ const show_captured_output -> fn () void {
 
 /// Compile (and unless expect_error, also run) a single test file.
 /// Returns 1 on pass, 0 on fail. Prints one PASS/FAIL line per test.
-const run_one_test -> fn (path: *byte, expect_error: int) int {
+const run_one_test -> fn (path: *byte, expect_error: i64) i64 {
     let cmd_str: string::String = make_compile_cmd(path, expect_error);
     defer { string::free_string(&cmd_str); }
 
-    let compile_result: int = system(cmd_str.slice.ptr);
+    let compile_result: i64 = system(cmd_str.slice.ptr);
 
-    let passed: int = 0;
-    let compiled_ok: int = 1;
+    let passed: i64 = 0;
+    let compiled_ok: i64 = 1;
     if (compile_result != 0) compiled_ok = 0;
 
-    let run_result: int = 0;
-    let show_capture: int = 0;
+    let run_result: i64 = 0;
+    let show_capture: i64 = 0;
 
     if (expect_error == 1) {
         // Error tests pass when compilation fails.
@@ -835,7 +835,7 @@ const run_one_test -> fn (path: *byte, expect_error: int) int {
         } elif (show_capture == 1) {
             if (compiled_ok == 1) {
                 // system() returns a raw wait status; decode normal exits.
-                let code: int = run_result;
+                let code: i64 = run_result;
                 if (code >= 256) code = code / 256;
                 io::print("      exited with code %d\n", [io::int_arg(code)]);
             }
@@ -848,7 +848,7 @@ const run_one_test -> fn (path: *byte, expect_error: int) int {
 
 /// Run all configured tests: valid tests must compile and exit 0,
 /// error tests must fail to compile.
-const run_tests -> fn () int {
+const run_tests -> fn () i64 {
     io::print("\n=== Running Tests ===\n", [io::NULL_FORMAT_ARG]);
 
     let tcfg: toml::TomlConfig = toml::parse_toml();
@@ -859,71 +859,71 @@ const run_tests -> fn () int {
     defer { free(valid_list); }
     let error_list: **byte = cast<**byte>(alloc(MAX_TEST_FILES * sizeof<*byte>));
     defer { free(error_list); }
-    let valid_n: int = 0;
-    let error_n: int = 0;
-    let owns_lists: int = 0;
+    let valid_n: i64 = 0;
+    let error_n: i64 = 0;
+    let owns_lists: i64 = 0;
 
-    let tcfg_valid: int = toml::get_test_valid_count();
-    let tcfg_error: int = toml::get_test_error_count();
+    let tcfg_valid: i64 = toml::get_test_valid_count();
+    let tcfg_error: i64 = toml::get_test_error_count();
 
     if (tcfg_valid == 0 && tcfg_error == 0) {
         owns_lists = 1;
 
-        let fc: int = 0;
+        let fc: i64 = 0;
         let fl: **byte = fs::scan_directory("tests/valid", &fc);
-        loop [j: int = 0](j < fc && valid_n < MAX_TEST_FILES) : (j = j + 1) {
+        loop [j: i64 = 0](j < fc && valid_n < MAX_TEST_FILES) : (j = j + 1) {
             valid_list[valid_n] = fl[j];
             valid_n = valid_n + 1;
         }
         free(fl);
 
-        let ec: int = 0;
+        let ec: i64 = 0;
         let el: **byte = fs::scan_directory("tests/errors", &ec);
-        loop [j: int = 0](j < ec && error_n < MAX_TEST_FILES) : (j = j + 1) {
+        loop [j: i64 = 0](j < ec && error_n < MAX_TEST_FILES) : (j = j + 1) {
             error_list[error_n] = el[j];
             error_n = error_n + 1;
         }
         free(el);
     } else {
-        loop [i: int = 0](i < tcfg_valid && valid_n < MAX_TEST_FILES) : (i = i + 1) {
+        loop [i: i64 = 0](i < tcfg_valid && valid_n < MAX_TEST_FILES) : (i = i + 1) {
             valid_list[valid_n] = toml::get_test_valid_path(i);
             valid_n = valid_n + 1;
         }
-        loop [i: int = 0](i < tcfg_error && error_n < MAX_TEST_FILES) : (i = i + 1) {
+        loop [i: i64 = 0](i < tcfg_error && error_n < MAX_TEST_FILES) : (i = i + 1) {
             error_list[error_n] = toml::get_test_error_path(i);
             error_n = error_n + 1;
         }
     }
 
-    let total: int = valid_n + error_n;
+    let total: i64 = valid_n + error_n;
     if (total == 0) {
-        io::print_err("No tests found.\nAdd a [test] section to lumix.toml or create tests/valid/ and tests/errors/ directories.\n\n", [0]);
+        io::print_err("No tests found.\nAdd a [test] section to lumix.toml or create tests/valid/ and tests/errors/ directories.\n\n", [cast<i64>(0)]);
         return 1;
     }
 
     io::print("Running %d test(s): %d valid, %d error-expected\n\n",
               [io::int_arg(total), io::int_arg(valid_n), io::int_arg(error_n)]);
 
-    let failed: int = 0;
+    let failed: i64 = 0;
 
-    loop [i: int = 0](i < valid_n) : (i = i + 1) {
+    loop [i: i64 = 0](i < valid_n) : (i = i + 1) {
         if (run_one_test(valid_list[i], 0) == 0) failed = failed + 1;
     }
 
-    loop [i: int = 0](i < error_n) : (i = i + 1) {
+    loop [i: i64 = 0](i < error_n) : (i = i + 1) {
         if (run_one_test(error_list[i], 1) == 0) failed = failed + 1;
     }
 
     system(TEST_RM_CMD);
 
     if (owns_lists == 1) {
-        loop [i: int = 0](i < valid_n) : (i = i + 1) { free(valid_list[i]); }
-        loop [i: int = 0](i < error_n) : (i = i + 1) { free(error_list[i]); }
+        loop [i: i64 = 0](i < valid_n) : (i = i + 1) { free(valid_list[i]); }
+        loop [i: i64 = 0](i < error_n) : (i = i + 1) { free(error_list[i]); }
     } else {
         toml::free_test_paths();
     }
 
-    let passed_total: int = total - failed;
+    let passed_total: i64 = total - failed;
     if (failed == 0) {
         io::print("\n%s%d/%d tests passed%s\n\n", [io::str_arg(term::GREEN),
                                                     io::int_arg(passed_total),
@@ -941,7 +941,7 @@ const run_tests -> fn () int {
     return 0;
 }
 
-const handle_build -> fn (argc: int, argv: **byte) int {
+const handle_build -> fn (argc: i64, argv: **byte) i64 {
     // --- Load lumix.toml if present ---
     let tcfg: toml::TomlConfig = toml::parse_toml();
     defer { toml::free_toml_config(&tcfg); }
@@ -952,7 +952,7 @@ const handle_build -> fn (argc: int, argv: **byte) int {
 
     // --- Resolve entry point ---
     let entry_point: *byte;
-    let free_entry: int = 0;
+    let free_entry: i64 = 0;
 
     if (tcfg.entry != cast<*byte>(0)) {
         entry_point = tcfg.entry;
@@ -987,13 +987,13 @@ const handle_build -> fn (argc: int, argv: **byte) int {
     }
 
     // --- Resolve optimisation level ---
-    let level: int = 0;
+    let level: i64 = 0;
     if (tcfg.optimize >= 0) level = tcfg.optimize;
 
     if (argv[3] != cast<*byte>(0)) {
         let optimize: *byte = argv[3];
-        let len_argv3: int = string::strlen(optimize);
-        loop [i: int = 0](i < len_argv3) : (++i) {
+        let len_argv3: i64 = string::strlen(optimize);
+        loop [i: i64 = 0](i < len_argv3) : (++i) {
             if (optimize[i] == '-' && optimize[i + 1] == 'O') {
                 let buf: *byte = cast<*byte>(alloc(2));
                 defer { free(buf); }
@@ -1006,7 +1006,7 @@ const handle_build -> fn (argc: int, argv: **byte) int {
     }
 
     // --- Resolve debug symbols ---
-    let dbg: int = 1;
+    let dbg: i64 = 1;
     if (tcfg.debug >= 0) dbg = tcfg.debug;
 
     let scan_dir: *byte = ".";
@@ -1026,11 +1026,11 @@ const handle_build -> fn (argc: int, argv: **byte) int {
         verbose:       1
     };
 
-    let result: int = build(&config);
+    let result: i64 = build(&config);
     return result;
 }
 
-pub const main -> fn (argc: int, argv: **byte) int {
+pub const main -> fn (argc: i64, argv: **byte) i64 {
     let cmd: *byte = argv[1];
     if (cmd == cast<*byte>(0)) {
         io::print("Usage:\n  init              Scaffold a new lumix.toml\n  config            Show resolved configuration\n  build [<name>]    Build the project\n  run [<key> ...]   Run command(s) from lumix.toml [run] args\n  test              Run test suites from lumix.toml [test]\n  clean             Remove build artifacts\n  deps              Show dependency tree\n  version           Show version\n",

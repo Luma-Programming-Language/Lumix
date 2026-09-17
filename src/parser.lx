@@ -4,16 +4,16 @@
 @use "utility" as util
 @use "std_io" as io
 
-const USE_DIRECTIVE_LEN: int = 4;
-const MAX_DEPS: int = 200;
+const USE_DIRECTIVE_LEN: i64 = 4;
+const MAX_DEPS: i64 = 200;
 
 #returns_ownership
-pub const parse_file_line -> fn (file_list: *byte, start: int, end: int) *byte {
-    let line_len: int = end - start;
+pub const parse_file_line -> fn (file_list: *byte, start: i64, end: i64) *byte {
+    let line_len: i64 = end - start;
     if (line_len <= 0) return cast<*byte>(0);
 
     // Strip trailing CR for Windows CRLF line endings
-    let len: int = line_len;
+    let len: i64 = line_len;
     if (len > 0 && file_list[end - 1] == '\r') {
         len = len - 1;
     }
@@ -21,15 +21,15 @@ pub const parse_file_line -> fn (file_list: *byte, start: int, end: int) *byte {
     return util::clean_dotslash_prefix(util::copy_string(file_list, start, len));
 }
 
-const skip_whitespace -> fn (content: *byte, pos: int, max_len: int) int {
+const skip_whitespace -> fn (content: *byte, pos: i64, max_len: i64) i64 {
     loop (pos < max_len && (content[pos] == ' ' || content[pos] == '\t')) : (pos = pos + 1) {}
     return pos;
 }
 
-const is_at_line_start -> fn (content: *byte, pos: int) int {
+const is_at_line_start -> fn (content: *byte, pos: i64) i64 {
     if (pos == 0) return 1;
 
-    let check_pos: int = pos - 1;
+    let check_pos: i64 = pos - 1;
     loop (check_pos >= 0) {
         if (content[check_pos] == '\n') return 1;
         if (content[check_pos] != ' ' && content[check_pos] != '\t') return 0;
@@ -39,7 +39,7 @@ const is_at_line_start -> fn (content: *byte, pos: int) int {
 }
 
 #returns_ownership
-pub const find_imports -> fn (file_path: *byte, out_count: *int) **byte {
+pub const find_imports -> fn (file_path: *byte, out_count: *i64) **byte {
     let imports: **byte = cast<**byte>(alloc(MAX_DEPS * sizeof<*byte>));
     *out_count = 0;
 
@@ -48,8 +48,8 @@ pub const find_imports -> fn (file_path: *byte, out_count: *int) **byte {
 
     defer { free(content); }
 
-    let len: int = string::strlen(content);
-    let i: int = 0;
+    let len: i64 = string::strlen(content);
+    let i: i64 = 0;
 
     loop (i < len) {
         if (i + 1 < len && content[i] == '/' && content[i + 1] == '/') {
@@ -63,10 +63,10 @@ pub const find_imports -> fn (file_path: *byte, out_count: *int) **byte {
                 continue;
             }
 
-            let matches: int = 1;
+            let matches: i64 = 1;
             let use_str: *byte = "@use";
 
-            loop [j: int = 0](j < USE_DIRECTIVE_LEN) : (j = j + 1) {
+            loop [j: i64 = 0](j < USE_DIRECTIVE_LEN) : (j = j + 1) {
                 if (content[i + j] != use_str[j]) {
                     matches = 0;
                     break;
@@ -79,11 +79,11 @@ pub const find_imports -> fn (file_path: *byte, out_count: *int) **byte {
 
                 if (i < len && content[i] == '"') {
                     i = i + 1;
-                    let mod_start: int = i;
+                    let mod_start: i64 = i;
 
                     loop (i < len && content[i] != '"') : (i = i + 1) {}
 
-                    let mod_len: int = i - mod_start;
+                    let mod_len: i64 = i - mod_start;
                     if (mod_len > 0 && *out_count < MAX_DEPS) {
                         imports[*out_count] = util::copy_string(content, mod_start, mod_len);
                         *out_count = *out_count + 1;
