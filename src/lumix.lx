@@ -80,7 +80,7 @@ const join_path -> fn (dir: *byte, name: *byte, out: **byte) void {
     @os {
         "linux"   -> { full[dir_len] = '/'; }
         "macos"   -> { full[dir_len] = '/'; }
-        "windows64" -> { full[dir_len] = '\\'; }
+        "windows64" -> { full[dir_len] = '/'; }
     }
     mem::memcpy(cast<*void>(&full[dir_len + 1]), cast<*void>(name), name_len);
     full[dir_len + 1 + name_len] = '\0';
@@ -215,6 +215,37 @@ const has_dep -> fn (slice_ptr: *string::Slice, slice_count: i64, dep_path: *byt
     return 0;
 }
 
+const is_same_path -> fn (left: *byte, right: *byte) i64 {
+    let left_len: i64 = string::strlen(left);
+    let right_len: i64 = string::strlen(right);
+    let longer: *byte = left;
+    let shorter: *byte = right;
+    let longer_len: i64 = left_len;
+    let shorter_len: i64 = right_len;
+
+    if (left_len < right_len) {
+        longer = right;
+        shorter = left;
+        longer_len = right_len;
+        shorter_len = left_len;
+    }
+
+    let offset: i64 = longer_len - shorter_len;
+    if (offset > 0 && longer[offset - 1] != '/' && longer[offset - 1] != '\\') {
+        return 0;
+    }
+
+    loop [i: i64 = 0](i < shorter_len) : (i = i + 1) {
+        let longer_char: byte = longer[offset + i];
+        let shorter_char: byte = shorter[i];
+        if ((longer_char == '/' || longer_char == '\\') !=
+            (shorter_char == '/' || shorter_char == '\\')) return 0;
+        if (longer_char != '/' && longer_char != '\\' && longer_char != shorter_char) return 0;
+    }
+
+    return 1;
+}
+
 #returns_ownership
 const convert_std_module_path -> fn (dep_name: *byte) *byte {
     let dep_len: i64 = string::strlen(dep_name);
@@ -266,7 +297,8 @@ const add_dependencies_to_cmd -> fn (slice: *string::Slice, slice_count: *i64, c
             }
         }
 
-        if (string::strcmp(g_file_paths[i], config.entry_point) == 0) continue;
+        // Windows recursive scans return absolute paths, while config entries may be relative.
+        if (is_same_path(g_file_paths[i], config.entry_point) == 1) continue;
 
         slice[*slice_count] = slice.null_terminated_slice(g_file_paths[i]);
         *slice_count = *slice_count + 1;
@@ -947,7 +979,7 @@ const handle_build -> fn (argc: i64, argv: **byte) i64 {
     defer { toml::free_toml_config(&tcfg); }
 
     if (tcfg.found == 1) {
-        io::print("lumix.toml found — using config file.\n", [io::NULL_FORMAT_ARG]);
+        io::print("lumix.toml found - using config file.\n", [io::NULL_FORMAT_ARG]);
     }
 
     // --- Resolve entry point ---
@@ -976,7 +1008,7 @@ const handle_build -> fn (argc: i64, argv: **byte) i64 {
 
     // --- Resolve output name ---
     let output_name: *byte;
-    if (argv[2] != cast<*byte>(0)) {
+    if (argc > 2) {
         output_name = argv[2];
     } elif (tcfg.name != cast<*byte>(0)) {
         output_name = tcfg.name;
@@ -990,7 +1022,7 @@ const handle_build -> fn (argc: i64, argv: **byte) i64 {
     let level: i64 = 0;
     if (tcfg.optimize >= 0) level = tcfg.optimize;
 
-    if (argv[3] != cast<*byte>(0)) {
+    if (argc > 3) {
         let optimize: *byte = argv[3];
         let len_argv3: i64 = string::strlen(optimize);
         loop [i: i64 = 0](i < len_argv3) : (++i) {
@@ -1031,13 +1063,13 @@ const handle_build -> fn (argc: i64, argv: **byte) i64 {
 }
 
 pub const main -> fn (argc: i64, argv: **byte) i64 {
-    let cmd: *byte = argv[1];
-    if (cmd == cast<*byte>(0)) {
+    if (argc <= 1) {
         io::print("Usage:\n  init              Scaffold a new lumix.toml\n  config            Show resolved configuration\n  build [<name>]    Build the project\n  run [<key> ...]   Run command(s) from lumix.toml [run] args\n  test              Run test suites from lumix.toml [test]\n  clean             Remove build artifacts\n  deps              Show dependency tree\n  version           Show version\n",
         [io::NULL_FORMAT_ARG]);
         return 1;
     }
 
+    let cmd: *byte = argv[1];
     if (string::strcmp(cmd, "build") == 0) {
         return handle_build(argc, argv);
     }
